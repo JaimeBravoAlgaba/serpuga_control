@@ -69,6 +69,13 @@ Seguimiento con velocidad angular no nula y corredor abierto:
 python -m serpuga_control --scenario turn
 ```
 
+Partida con la barra transversal y las orugas antiparalelas —una extendida
+hacia delante y la otra hacia atrás—:
+
+```bash
+python -m serpuga_control --scenario opposed
+```
+
 Para ejecutar únicamente el cálculo, por ejemplo en CI o en una terminal sin
 escritorio:
 
@@ -80,6 +87,12 @@ Se puede guardar además una captura del reproductor sin cambiar el modo live:
 
 ```bash
 python -m serpuga_control --scenario gap --screenshot artifacts/gap.png
+```
+
+Para exportar una reproducción completa a velocidad 1×:
+
+```bash
+python -m serpuga_control --scenario opposed --video artifacts/opposed.mp4
 ```
 
 También se instala el comando equivalente:

@@ -172,8 +172,18 @@ class NMPCController:
             objective += p.track_effort_weight * ca.sumsqr(control[0:2])
             objective += p.articulation_rate_weight * ca.sumsqr(control[2:4])
             objective += p.input_rate_weight * ca.sumsqr(control_change)
-            objective += p.symmetry_weight * (state[3] + state[4]) ** 2
-            objective += p.nominal_configuration_weight * ca.sumsqr(state[3:5])
+            symmetry_reference = float(
+                np.dot(r.symmetry_coupling, r.nominal_configuration)
+            )
+            symmetry_expression = ca.dot(
+                ca.DM(r.symmetry_coupling), state[3:5]
+            )
+            objective += p.symmetry_weight * (
+                symmetry_expression - symmetry_reference
+            ) ** 2
+            objective += p.nominal_configuration_weight * ca.sumsqr(
+                state[3:5] - ca.DM(r.nominal_configuration)
+            )
 
             world_acceleration = (world_velocity - previous_velocity_expression) / p.dt
             centre_of_mass = self.robot.centre_of_mass_world(state)
@@ -272,17 +282,18 @@ class NMPCController:
         )
         fold_fraction = np.clip(0.88 * narrowing, 0.0, 0.92)
         for index in range(2):
-            state_guess[3 + index] = fold_fraction * r.narrow_configuration[index]
+            state_guess[3 + index] = r.nominal_configuration[index] + fold_fraction * (
+                r.narrow_configuration[index] - r.nominal_configuration[index]
+            )
         state_guess[3:5, 0] = state[3:5]
 
         control_guess = np.zeros((self.control_dimension, n), dtype=float)
-        mean_angle = np.mean(state_guess[3:5, :-1], axis=0)
-        longitudinal_factor = np.maximum(np.cos(mean_angle), 0.28)
-        control_guess[0:2] = np.clip(
-            preview.speeds / longitudinal_factor,
-            -r.track_speed_limit,
-            r.track_speed_limit,
-        )
+        for index in range(2):
+            control_guess[index] = np.clip(
+                preview.speeds * np.cos(state_guess[3 + index, :-1]),
+                -r.track_speed_limit,
+                r.track_speed_limit,
+            )
         control_guess[2:4] = np.clip(
             np.diff(state_guess[3:5], axis=1) / self.parameters.dt,
             -r.articulation_rate_limit,

@@ -23,9 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--scenario",
-        choices=("gap", "turn"),
+        choices=("gap", "turn", "opposed"),
         default="gap",
-        help="Synthetic scenario to run.",
+        help="Synthetic scenario: standard gap, turn, or opposed-track start.",
     )
     parser.add_argument(
         "--headless",
@@ -40,6 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optionally save a frame of the live visualiser as a PNG.",
     )
+    parser.add_argument(
+        "--video",
+        type=Path,
+        default=None,
+        help="Optionally export the 1x replay as an MP4 or GIF.",
+    )
     parser.add_argument("--quiet", action="store_true", help="Suppress progress messages.")
     parser.add_argument(
         "--no-zmp",
@@ -50,13 +56,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_demo(arguments: argparse.Namespace):
-    robot_parameters = RobotParameters()
+    robot_parameters = (
+        RobotParameters.opposed_tracks()
+        if arguments.scenario == "opposed"
+        else RobotParameters()
+    )
     mpc_parameters = MPCParameters(use_zmp=not arguments.no_zmp)
     simulation_parameters = SimulationParameters()
+    if arguments.scenario == "opposed":
+        initial_state = simulation_parameters.initial_state.copy()
+        initial_state[3:5] = robot_parameters.nominal_configuration
+        simulation_parameters = replace(
+            simulation_parameters,
+            initial_state=initial_state,
+        )
     robot = RobotDescription(robot_parameters)
     model = KinematicModel(robot, mpc_parameters)
 
-    if arguments.scenario == "gap":
+    if arguments.scenario in ("gap", "opposed"):
         corridor = StraightGapCorridor()
         trajectory = ReferenceTrajectory.straight(
             duration=simulation_parameters.duration + mpc_parameters.horizon_time,
@@ -95,7 +112,11 @@ def run_demo(arguments: argparse.Namespace):
     print(json.dumps(log.summary(), indent=2, ensure_ascii=False))
 
     player: LiveSimulationPlayer | None = None
-    if not arguments.headless or arguments.screenshot is not None:
+    if (
+        not arguments.headless
+        or arguments.screenshot is not None
+        or arguments.video is not None
+    ):
         player = LiveSimulationPlayer(
             log=log,
             robot=robot,
@@ -105,6 +126,9 @@ def run_demo(arguments: argparse.Namespace):
     if arguments.screenshot is not None and player is not None:
         screenshot = player.save_frame(arguments.screenshot)
         print(f"Visualiser screenshot saved to {screenshot.resolve()}")
+    if arguments.video is not None and player is not None:
+        video = player.save_animation(arguments.video)
+        print(f"Visualiser animation saved to {video.resolve()}")
     if not arguments.headless and player is not None:
         if not arguments.quiet:
             print("Opening real-time replay at 1x. Close the window to exit.")

@@ -91,3 +91,7 @@ Los parámetros geométricos incluidos son ilustrativos. Antes de pasar al robot
 real deben sustituirse las posiciones de pivotes, offsets, masas, altura del
 centro de masas y límites de los actuadores.
 
+La configuración nominal y el acoplamiento de simetría son también parámetros
+del robot. Esto permite describir tanto el montaje paralelo, con
+\(q_1+q_2=0\), como el montaje antiparalelo, con \(q_2-q_1=\pi\), sin cambiar
+la formulación del controlador.

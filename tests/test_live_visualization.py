@@ -66,5 +66,9 @@ def test_live_player_navigation_and_screenshot(tmp_path) -> None:
     assert output.stat().st_size > 10_000
     assert player.playback.index == 1
     assert player.playback.playing
+    animation = player.save_animation(tmp_path / "live-player.gif", dpi=40)
+    assert animation.exists()
+    assert animation.stat().st_size > 10_000
+    assert player.playback.index == 1
+    assert player.playback.playing
     player.close()
-

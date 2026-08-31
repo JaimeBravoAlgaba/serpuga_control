@@ -25,3 +25,18 @@ def test_centre_of_mass_stays_finite_across_configuration() -> None:
         centre = np.asarray(robot.centre_of_mass_world(state))
         assert np.all(np.isfinite(centre))
 
+
+def test_opposed_configuration_has_transverse_bar_and_antiparallel_tracks() -> None:
+    parameters = RobotParameters.opposed_tracks()
+    robot = RobotDescription(parameters)
+    q = parameters.nominal_configuration
+    first_centre = np.asarray(robot.track_center_body(q[0], 0))
+    second_centre = np.asarray(robot.track_center_body(q[1], 1))
+    connector_direction = parameters.pivot_positions[1] - parameters.pivot_positions[0]
+    first_direction = np.array([np.cos(q[0]), np.sin(q[0])])
+    second_direction = np.array([np.cos(q[1]), np.sin(q[1])])
+
+    assert first_centre[0] > 0.0
+    assert second_centre[0] < 0.0
+    assert np.isclose(connector_direction[0], 0.0)
+    assert np.isclose(np.dot(first_direction, second_direction), -1.0)

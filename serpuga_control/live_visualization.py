@@ -8,6 +8,7 @@ from typing import Any
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.animation import FFMpegWriter, PillowWriter
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon, Rectangle
 from matplotlib.widgets import Button
@@ -734,11 +735,41 @@ class LiveSimulationPlayer:
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         if frame_index is None:
-            frame_index = int(np.argmax(np.max(np.abs(self.log.states[:, 3:5]), axis=1)))
+            frame_index = int(np.argmin(self.log.robot_widths))
         previous_index = self.playback.index
         was_playing = self.playback.playing
         self.seek(frame_index)
         self.figure.savefig(output, dpi=170, facecolor=self.figure.get_facecolor())
+        self.playback.index = previous_index
+        self.playback.playing = was_playing
+        self._render_frame()
+        return output
+
+    def save_animation(self, output_path: str | Path, *, dpi: int = 100) -> Path:
+        """Export the same 1x playback shown by the interactive window."""
+
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        frames_per_second = 1.0 / self.dt
+        if output.suffix.lower() == ".mp4":
+            writer = FFMpegWriter(
+                fps=frames_per_second,
+                bitrate=2_000,
+                metadata={"title": "SERPUGA MPC simulation"},
+            )
+        elif output.suffix.lower() == ".gif":
+            writer = PillowWriter(fps=frames_per_second)
+        else:
+            raise ValueError("Animation output must use the .mp4 or .gif extension")
+
+        previous_index = self.playback.index
+        was_playing = self.playback.playing
+        with writer.saving(self.figure, str(output), dpi=dpi):
+            for index in range(self.playback.frame_count):
+                self.playback.index = index
+                self.playback.playing = index < self.playback.last_index
+                self._render_frame(force_draw=True)
+                writer.grab_frame(facecolor=self.figure.get_facecolor())
         self.playback.index = previous_index
         self.playback.playing = was_playing
         self._render_frame()

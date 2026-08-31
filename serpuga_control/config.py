@@ -18,6 +18,14 @@ def _default_offsets() -> np.ndarray:
     return np.array([[0.21, 0.0], [0.21, 0.0]], dtype=float)
 
 
+def _default_nominal_configuration() -> np.ndarray:
+    return np.zeros(2, dtype=float)
+
+
+def _default_symmetry_coupling() -> np.ndarray:
+    return np.ones(2, dtype=float)
+
+
 @dataclass(frozen=True)
 class RobotParameters:
     """Geometric, inertial and actuator parameters.
@@ -50,6 +58,10 @@ class RobotParameters:
     narrow_configuration: np.ndarray = field(
         default_factory=lambda: np.deg2rad(np.array([-60.0, 60.0]))
     )
+    nominal_configuration: np.ndarray = field(
+        default_factory=_default_nominal_configuration
+    )
+    symmetry_coupling: np.ndarray = field(default_factory=_default_symmetry_coupling)
     track_speed_limit: float = 1.10
     articulation_rate_limit: float = np.deg2rad(75.0)
     track_acceleration_limit: float = 2.5
@@ -57,6 +69,23 @@ class RobotParameters:
 
     longitudinal_slip_weight: float = 1.0
     lateral_slip_weight: float = 6.0
+
+    @classmethod
+    def opposed_tracks(cls) -> "RobotParameters":
+        """Geometry with a transverse bar and antiparallel nominal tracks.
+
+        Track 1 extends along +x and track 2 along -x.  Their pivots lie on
+        the body y axis, so the connector is perpendicular to forward motion.
+        """
+
+        return cls(
+            pivot_positions=np.array([[0.0, 0.24], [0.0, -0.24]], dtype=float),
+            q_min=np.deg2rad(np.array([-70.0, 110.0])),
+            q_max=np.deg2rad(np.array([0.0, 180.0])),
+            nominal_configuration=np.deg2rad(np.array([0.0, 180.0])),
+            narrow_configuration=np.deg2rad(np.array([-60.0, 120.0])),
+            symmetry_coupling=np.array([-1.0, 1.0], dtype=float),
+        )
 
     def __post_init__(self) -> None:
         if self.pivot_positions.shape != (2, 2):
@@ -67,8 +96,20 @@ class RobotParameters:
             raise ValueError("q_min and q_max must have shape (2,)")
         if self.narrow_configuration.shape != (2,):
             raise ValueError("narrow_configuration must have shape (2,)")
+        if self.nominal_configuration.shape != (2,):
+            raise ValueError("nominal_configuration must have shape (2,)")
+        if self.symmetry_coupling.shape != (2,):
+            raise ValueError("symmetry_coupling must have shape (2,)")
+        if np.linalg.norm(self.symmetry_coupling) <= 0.0:
+            raise ValueError("symmetry_coupling must be non-zero")
         if np.any(self.q_min >= self.q_max):
             raise ValueError("Every q_min must be lower than q_max")
+        for name, configuration in (
+            ("nominal_configuration", self.nominal_configuration),
+            ("narrow_configuration", self.narrow_configuration),
+        ):
+            if np.any(configuration < self.q_min) or np.any(configuration > self.q_max):
+                raise ValueError(f"{name} must lie inside the articulation limits")
 
 
 @dataclass(frozen=True)

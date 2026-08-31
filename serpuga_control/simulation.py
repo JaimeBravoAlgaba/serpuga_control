@@ -54,7 +54,13 @@ class SimulationLog:
             ),
             "minimum_clearance_m": float(np.min(self.clearances)),
             "minimum_stability_margin_m": float(np.min(self.stability_margins)),
-            "maximum_fold_deg": float(np.max(np.abs(np.rad2deg(self.states[:, 3:5])))),
+            "maximum_fold_deg": float(
+                np.max(
+                    np.abs(
+                        np.rad2deg(self.states[:, 3:5] - self.states[0, 3:5])
+                    )
+                )
+            ),
             "mean_solve_time_s": float(np.mean(self.solve_times)),
             "maximum_solve_time_s": float(np.max(self.solve_times)),
         }
