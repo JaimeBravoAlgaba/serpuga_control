@@ -89,6 +89,15 @@ hacia delante y la otra hacia atrás—:
 python -m serpuga_control --scenario opposed
 ```
 
+La anchura total del hueco puede sobrescribirse en metros desde la terminal:
+
+```bash
+python -m serpuga_control --scenario opposed --gap-width 0.40
+```
+
+El margen de seguridad configurado se aplica adicionalmente hacia el interior
+desde cada pared.
+
 Para ejecutar únicamente el cálculo, por ejemplo en CI o en una terminal sin
 escritorio:
 

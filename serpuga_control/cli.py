@@ -48,6 +48,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optionally export the 1x replay as an MP4 or GIF.",
     )
+    parser.add_argument(
+        "--gap-width",
+        type=float,
+        default=None,
+        metavar="METRES",
+        help=(
+            "Override the full gap width in metres for the gap and opposed "
+            "scenarios (defaults: 0.61 m and 0.58 m, respectively)."
+        ),
+    )
     parser.add_argument("--quiet", action="store_true", help="Suppress progress messages.")
     parser.add_argument(
         "--no-zmp",
@@ -58,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_demo(arguments: argparse.Namespace):
+    if arguments.gap_width is not None and arguments.gap_width <= 0.0:
+        raise ValueError("--gap-width must be greater than zero")
+    if arguments.scenario == "turn" and arguments.gap_width is not None:
+        raise ValueError("--gap-width is only valid for gap or opposed scenarios")
+
     robot_parameters = (
         RobotParameters.opposed_tracks()
         if arguments.scenario == "opposed"
@@ -90,10 +105,13 @@ def run_demo(arguments: argparse.Namespace):
         # The parallel-start robot is 0.62 m wide, so a 0.61 m opening still
         # requires active folding after accounting for the 10 mm wall margin.
         # The opposed scenario keeps the more demanding 0.58 m opening.
-        corridor = (
-            StraightGapCorridor(gap_width=0.61)
-            if arguments.scenario == "gap"
-            else StraightGapCorridor()
+        default_gap_width = 0.61 if arguments.scenario == "gap" else 0.58
+        corridor = StraightGapCorridor(
+            gap_width=(
+                default_gap_width
+                if arguments.gap_width is None
+                else arguments.gap_width
+            )
         )
         trajectory = ReferenceTrajectory.straight(
             duration=simulation_parameters.duration + mpc_parameters.horizon_time,
