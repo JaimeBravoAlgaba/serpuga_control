@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import tkinter as tk
 from queue import Empty, Queue
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from time import monotonic
 from tkinter import messagebox, simpledialog, ttk
 from typing import Any
 
+import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
@@ -22,7 +23,7 @@ from .configuration import (
 )
 from .online_visualization import OnlineSimulationPlot
 from .runtime import build_runtime
-from .simulation import ClosedLoopSession, SimulationLog
+from .simulation import ClosedLoopSession, SimulationLog, TeleoperationCommand
 
 
 class ScrollableTab(ttk.Frame):
@@ -96,10 +97,15 @@ class SimulationApplication:
         self.stop_event = Event()
         self.run_gate = Event()
         self.worker: Thread | None = None
+        self.pending_configuration: ApplicationConfiguration | None = None
+        self.pending_reset_teleoperation = False
         self.current_configuration: ApplicationConfiguration | None = None
         self.last_log: SimulationLog | None = None
         self.form_variables: dict[str, tk.StringVar | tk.BooleanVar] = {}
         self.form_widgets: list[tk.Widget] = []
+        self.teleoperation_lock = Lock()
+        self.teleoperation_command = TeleoperationCommand()
+        self._updating_teleoperation = False
 
         self._configure_style()
         self._build_layout()
@@ -154,7 +160,10 @@ class SimulationApplication:
         )
         self.save_button.grid(row=0, column=3, padx=(3, 12))
         self.run_button = ttk.Button(
-            profile_bar, text="Ejecutar", style="Run.TButton", command=self.start
+            profile_bar,
+            text="Cargar parámetros",
+            style="Run.TButton",
+            command=self.start,
         )
         self.run_button.grid(row=0, column=4, padx=3)
         self.pause_button = ttk.Button(
@@ -185,19 +194,20 @@ class SimulationApplication:
         )
         self.toolbar.update()
         self.toolbar.pack(side="left")
-        self.plot = OnlineSimulationPlot(self.figure, self.canvas.draw_idle)
+        self.plot = OnlineSimulationPlot(self.figure, self.canvas.draw)
 
         settings_frame.rowconfigure(1, weight=1)
         settings_frame.columnconfigure(0, weight=1)
         ttk.Label(
             settings_frame,
-            text="Los cambios se validan al pulsar Ejecutar.",
+            text="Los parámetros se aplican al pulsar Cargar parámetros.",
             style="Subtitle.TLabel",
             padding=(8, 4),
         ).grid(row=0, column=0, sticky="w")
         self.notebook = ttk.Notebook(settings_frame)
         self.notebook.grid(row=1, column=0, sticky="nsew")
         self._build_forms()
+        self._build_teleoperation_panel(settings_frame)
 
         status_frame = ttk.Frame(self.root, padding=(12, 2, 12, 8))
         status_frame.grid(row=2, column=0, sticky="ew")
@@ -259,6 +269,176 @@ class SimulationApplication:
             self.form_widgets.append(widget)
             group_rows[group_key] += 1
 
+    def _build_teleoperation_panel(self, parent: ttk.Frame) -> None:
+        panel = ttk.LabelFrame(parent, text="Teleoperación", padding=(8, 7))
+        panel.grid(row=2, column=0, sticky="ew", padx=2, pady=(8, 0))
+        panel.columnconfigure(1, weight=1)
+
+        self.teleop_enabled_var = tk.BooleanVar(value=False)
+        toggle = ttk.Checkbutton(
+            panel,
+            text="Modo manual (desactiva MPC)",
+            variable=self.teleop_enabled_var,
+            command=self._on_teleoperation_toggled,
+        )
+        toggle.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+
+        self.teleop_speed_vars = [
+            tk.DoubleVar(value=0.0),
+            tk.DoubleVar(value=0.0),
+        ]
+        self.teleop_q_vars = [
+            tk.DoubleVar(value=0.0),
+            tk.DoubleVar(value=0.0),
+        ]
+        self.teleop_speed_scales: list[ttk.Scale] = []
+        self.teleop_q_scales: list[ttk.Scale] = []
+
+        rows = (
+            ("v1", "m/s", self.teleop_speed_vars[0], self.teleop_speed_scales),
+            ("v2", "m/s", self.teleop_speed_vars[1], self.teleop_speed_scales),
+            ("q1", "deg", self.teleop_q_vars[0], self.teleop_q_scales),
+            ("q2", "deg", self.teleop_q_vars[1], self.teleop_q_scales),
+        )
+        for row_index, (label, unit, variable, scales) in enumerate(rows, start=1):
+            ttk.Label(panel, text=label).grid(
+                row=row_index, column=0, sticky="w", padx=(0, 7), pady=2
+            )
+            scale = ttk.Scale(
+                panel,
+                variable=variable,
+                orient="horizontal",
+                command=lambda _value: self._sync_teleoperation_command(),
+            )
+            scale.grid(row=row_index, column=1, sticky="ew", pady=2)
+            scales.append(scale)
+            entry = ttk.Entry(panel, textvariable=variable, width=8)
+            entry.grid(row=row_index, column=2, sticky="e", padx=(8, 3), pady=2)
+            ttk.Label(panel, text=unit, foreground="#667085").grid(
+                row=row_index, column=3, sticky="w", pady=2
+            )
+            variable.trace_add(
+                "write",
+                lambda *_args: self._sync_teleoperation_command(),
+            )
+
+        buttons = ttk.Frame(panel)
+        buttons.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(7, 0))
+        buttons.columnconfigure(0, weight=1)
+        ttk.Button(
+            buttons,
+            text="Parar orugas",
+            command=self._stop_manual_tracks,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        ttk.Button(
+            buttons,
+            text="Usar q actual",
+            command=self._capture_current_articulation,
+        ).grid(row=0, column=1, sticky="ew")
+
+    def _configure_teleoperation_controls(
+        self,
+        configuration: ApplicationConfiguration,
+        *,
+        reset_values: bool,
+    ) -> None:
+        robot = configuration.robot
+        speed_limit = float(robot.track_speed_limit)
+        q_min = np.rad2deg(robot.q_min)
+        q_max = np.rad2deg(robot.q_max)
+
+        self._updating_teleoperation = True
+        try:
+            for scale in self.teleop_speed_scales:
+                scale.configure(from_=-speed_limit, to=speed_limit)
+            for index, scale in enumerate(self.teleop_q_scales):
+                scale.configure(from_=float(q_min[index]), to=float(q_max[index]))
+            if reset_values:
+                q_initial = np.rad2deg(configuration.simulation.initial_state[3:5])
+                self.teleop_speed_vars[0].set(0.0)
+                self.teleop_speed_vars[1].set(0.0)
+                self.teleop_q_vars[0].set(float(q_initial[0]))
+                self.teleop_q_vars[1].set(float(q_initial[1]))
+                self.teleop_enabled_var.set(False)
+            else:
+                for index, variable in enumerate(self.teleop_q_vars):
+                    variable.set(
+                        float(np.clip(variable.get(), q_min[index], q_max[index]))
+                    )
+                for variable in self.teleop_speed_vars:
+                    variable.set(
+                        float(np.clip(variable.get(), -speed_limit, speed_limit))
+                    )
+        finally:
+            self._updating_teleoperation = False
+        self._sync_teleoperation_command()
+
+    def _current_state(self) -> np.ndarray | None:
+        if self.last_log is not None and self.last_log.states.size:
+            return np.asarray(self.last_log.states[-1], dtype=float)
+        if self.current_configuration is not None:
+            return np.asarray(
+                self.current_configuration.simulation.initial_state,
+                dtype=float,
+            )
+        return None
+
+    def _capture_current_articulation(self) -> None:
+        state = self._current_state()
+        if state is None:
+            return
+        q = np.rad2deg(state[3:5])
+        self.teleop_q_vars[0].set(float(q[0]))
+        self.teleop_q_vars[1].set(float(q[1]))
+
+    def _stop_manual_tracks(self) -> None:
+        self.teleop_speed_vars[0].set(0.0)
+        self.teleop_speed_vars[1].set(0.0)
+
+    def _on_teleoperation_toggled(self) -> None:
+        if self.teleop_enabled_var.get():
+            self._capture_current_articulation()
+            self.status_var.set("Teleoperación manual · MPC desactivado")
+        else:
+            self.status_var.set("MPC activado")
+        self._sync_teleoperation_command()
+        if self.teleop_enabled_var.get() and (
+            self.worker is None or not self.worker.is_alive()
+        ):
+            self.start()
+
+    def _sync_teleoperation_command(self) -> None:
+        if self._updating_teleoperation:
+            return
+        try:
+            track_speeds = np.array(
+                [variable.get() for variable in self.teleop_speed_vars],
+                dtype=float,
+            )
+            q_targets_deg = np.array(
+                [variable.get() for variable in self.teleop_q_vars],
+                dtype=float,
+            )
+        except (ValueError, tk.TclError):
+            return
+        articulation_targets = np.deg2rad(q_targets_deg)
+        command = TeleoperationCommand(
+            enabled=bool(self.teleop_enabled_var.get()),
+            track_speeds=track_speeds,
+            articulation_targets=articulation_targets,
+        )
+        with self.teleoperation_lock:
+            self.teleoperation_command = command
+
+    def _current_teleoperation_command(self) -> TeleoperationCommand:
+        with self.teleoperation_lock:
+            command = self.teleoperation_command
+            return TeleoperationCommand(
+                enabled=command.enabled,
+                track_speeds=command.track_speeds.copy(),
+                articulation_targets=command.articulation_targets.copy(),
+            )
+
     def _refresh_profiles(self, select: str | None = None) -> None:
         profiles = self.store.list_profiles()
         self.profile_combo.configure(values=profiles)
@@ -271,10 +451,7 @@ class SimulationApplication:
         values = configuration_to_form_values(configuration)
         for identifier, value in values.items():
             self.form_variables[identifier].set(value)
-        self.current_configuration = configuration
-        self.plot.reset(configuration)
-        self.status_var.set("Configuración cargada · robot inicializado")
-        self.metrics_var.set("")
+        self._request_run(configuration, reset_teleoperation=True)
 
     def _form_configuration(self) -> ApplicationConfiguration:
         values = {
@@ -297,8 +474,6 @@ class SimulationApplication:
         self._set_form_configuration(configuration)
 
     def _load_selected_profile(self) -> None:
-        if self.worker is not None and self.worker.is_alive():
-            return
         name = self.profile_var.get()
         if not name:
             return
@@ -345,20 +520,12 @@ class SimulationApplication:
         self._refresh_profiles(path.stem)
         self.status_var.set(f"Configuración guardada en {path}")
 
-    def _set_editing_enabled(self, enabled: bool) -> None:
+    def _set_run_controls_enabled(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
-        for widget in self.form_widgets:
-            widget.configure(state=state)
-        self.profile_combo.configure(state="readonly" if enabled else "disabled")
-        self.load_button.configure(state=state)
-        self.save_button.configure(state=state)
-        self.run_button.configure(state=state)
-        self.pause_button.configure(state="disabled" if enabled else "normal")
-        self.stop_button.configure(state="disabled" if enabled else "normal")
+        self.pause_button.configure(state=state)
+        self.stop_button.configure(state=state)
 
     def start(self) -> None:
-        if self.worker is not None and self.worker.is_alive():
-            return
         try:
             configuration = self._form_configuration()
         except ConfigurationError as error:
@@ -366,13 +533,42 @@ class SimulationApplication:
                 "Configuración no válida", str(error), parent=self.root
             )
             return
+        self._request_run(configuration, reset_teleoperation=False)
 
+    def _request_run(
+        self,
+        configuration: ApplicationConfiguration,
+        *,
+        reset_teleoperation: bool,
+    ) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            self.pending_configuration = configuration
+            self.pending_reset_teleoperation = reset_teleoperation
+            self.stop_event.set()
+            self.run_gate.set()
+            self.pause_button.configure(text="Pausar", state="disabled")
+            self.stop_button.configure(state="disabled")
+            self.status_var.set("Cargando parámetros tras la iteración actual…")
+            return
+
+        self._begin_run(configuration, reset_teleoperation=reset_teleoperation)
+
+    def _begin_run(
+        self,
+        configuration: ApplicationConfiguration,
+        *,
+        reset_teleoperation: bool,
+    ) -> None:
         self.current_configuration = configuration
         self.last_log = None
         self.plot.reset(configuration)
+        self._configure_teleoperation_controls(
+            configuration,
+            reset_values=reset_teleoperation,
+        )
         self.stop_event.clear()
         self.run_gate.set()
-        self._set_editing_enabled(False)
+        self._set_run_controls_enabled(True)
         self.pause_button.configure(text="Pausar")
         self.status_var.set("Inicializando el problema MPC…")
         self.metrics_var.set("")
@@ -407,10 +603,18 @@ class SimulationApplication:
                     break
 
                 started = monotonic()
-                succeeded = session.step()
+                command = self._current_teleoperation_command()
+                succeeded = session.step(
+                    command,
+                    stop_when_complete=not command.enabled,
+                )
                 elapsed = monotonic() - started
                 if session.times:
-                    self.messages.put(("frame", (session.to_log(), elapsed)))
+                    frame_drawn = Event()
+                    self.messages.put(
+                        ("frame", (session.to_log(), elapsed, frame_drawn))
+                    )
+                    self._wait_for_frame_draw(frame_drawn)
                 if not succeeded:
                     break
 
@@ -427,6 +631,10 @@ class SimulationApplication:
             self.messages.put(("done", log))
         except Exception as error:  # noqa: BLE001 - GUI boundary surfaces errors.
             self.messages.put(("error", str(error)))
+
+    def _wait_for_frame_draw(self, frame_drawn: Event) -> None:
+        while not frame_drawn.wait(0.05) and not self.stop_event.is_set():
+            continue
 
     def toggle_pause(self) -> None:
         if self.worker is None or not self.worker.is_alive():
@@ -456,15 +664,24 @@ class SimulationApplication:
                 if kind == "ready":
                     self.status_var.set("Simulación online · resolviendo paso a paso")
                 elif kind == "frame":
-                    log, elapsed = payload
+                    log, elapsed, frame_drawn = payload
                     self.last_log = log
-                    self.plot.update_log(log)
-                    dt = self.current_configuration.mpc.dt
-                    realtime_factor = min(1.0, dt / max(elapsed, dt))
-                    self.metrics_var.set(
-                        f"t={log.times[-1] + dt:.2f}s · solve={elapsed:.3f}s · "
-                        f"ritmo={realtime_factor:.2f}×"
-                    )
+                    try:
+                        self.plot.update_log(log)
+                        dt = self.current_configuration.mpc.dt
+                        realtime_factor = min(1.0, dt / max(elapsed, dt))
+                        mode = (
+                            log.control_modes[-1]
+                            if log.control_modes
+                            else "mpc"
+                        )
+                        mode_text = "manual" if mode == "manual" else "mpc"
+                        self.metrics_var.set(
+                            f"t={log.times[-1] + dt:.2f}s · modo={mode_text} · "
+                            f"solve={elapsed:.3f}s · ritmo={realtime_factor:.2f}×"
+                        )
+                    finally:
+                        frame_drawn.set()
                 elif kind == "failure":
                     self.status_var.set("El solver MPC no encontró una solución")
                     messagebox.showerror("Fallo del MPC", payload, parent=self.root)
@@ -484,7 +701,18 @@ class SimulationApplication:
         self.last_log = log
         self.worker = None
         self.run_gate.clear()
-        self._set_editing_enabled(True)
+        if self.pending_configuration is not None:
+            configuration = self.pending_configuration
+            reset_teleoperation = self.pending_reset_teleoperation
+            self.pending_configuration = None
+            self.pending_reset_teleoperation = False
+            self._begin_run(
+                configuration,
+                reset_teleoperation=reset_teleoperation,
+            )
+            return
+
+        self._set_run_controls_enabled(False)
         self.pause_button.configure(text="Pausar")
         if log is None:
             return

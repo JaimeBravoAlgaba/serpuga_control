@@ -128,16 +128,6 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
     _field("Robot", "Articulaciones", "robot", "q2_max_deg", "q2 máximo", "deg"),
     _field("Robot", "Articulaciones", "robot", "q1_nominal_deg", "q1 nominal", "deg"),
     _field("Robot", "Articulaciones", "robot", "q2_nominal_deg", "q2 nominal", "deg"),
-    _field("Robot", "Articulaciones", "robot", "q1_narrow_deg", "q1 en hueco", "deg"),
-    _field("Robot", "Articulaciones", "robot", "q2_narrow_deg", "q2 en hueco", "deg"),
-    _field(
-        "Robot",
-        "Articulaciones",
-        "robot",
-        "narrow_body_yaw_deg",
-        "Giro del cuerpo en hueco",
-        "deg",
-    ),
     _field("Robot", "Articulaciones", "robot", "symmetry_1", "Acoplamiento q1"),
     _field("Robot", "Articulaciones", "robot", "symmetry_2", "Acoplamiento q2"),
     # Robot · actuators and contact projection
@@ -384,7 +374,7 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
         "Restricciones",
         "mpc",
         "maximum_heading_error_deg",
-        "Error máximo de orientación",
+        "Umbral blando de orientación",
         "deg",
     ),
     _field(
@@ -622,12 +612,6 @@ class ApplicationConfiguration:
                     ]
                 )
             ),
-            narrow_configuration=deg(
-                np.array(
-                    [number("robot", "q1_narrow_deg"), number("robot", "q2_narrow_deg")]
-                )
-            ),
-            narrow_body_yaw=float(deg(number("robot", "narrow_body_yaw_deg"))),
             symmetry_coupling=np.array(
                 [number("robot", "symmetry_1"), number("robot", "symmetry_2")],
                 dtype=float,
@@ -740,9 +724,6 @@ class ApplicationConfiguration:
                 "q2_max_deg": float(degrees(r.q_max[1])),
                 "q1_nominal_deg": float(degrees(r.nominal_configuration[0])),
                 "q2_nominal_deg": float(degrees(r.nominal_configuration[1])),
-                "q1_narrow_deg": float(degrees(r.narrow_configuration[0])),
-                "q2_narrow_deg": float(degrees(r.narrow_configuration[1])),
-                "narrow_body_yaw_deg": float(degrees(r.narrow_body_yaw)),
                 "symmetry_1": float(r.symmetry_coupling[0]),
                 "symmetry_2": float(r.symmetry_coupling[1]),
                 "track_speed_limit_mps": float(r.track_speed_limit),

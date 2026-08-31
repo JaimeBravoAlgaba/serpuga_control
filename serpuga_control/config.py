@@ -53,14 +53,10 @@ class RobotParameters:
         default_factory=lambda: np.deg2rad(np.array([-70.0, 0.0]))
     )
     q_max: np.ndarray = field(default_factory=lambda: np.deg2rad(np.array([0.0, 70.0])))
-    narrow_configuration: np.ndarray = field(
-        default_factory=lambda: np.deg2rad(np.array([-60.0, 60.0]))
-    )
     nominal_configuration: np.ndarray = field(
         default_factory=_default_nominal_configuration
     )
     symmetry_coupling: np.ndarray = field(default_factory=_default_symmetry_coupling)
-    narrow_body_yaw: float = 0.0
     track_speed_limit: float = 1.10
     articulation_rate_limit: float = np.deg2rad(75.0)
     track_acceleration_limit: float = 2.5
@@ -82,9 +78,7 @@ class RobotParameters:
             q_min=np.deg2rad(np.array([-70.0, 110.0])),
             q_max=np.deg2rad(np.array([0.0, 180.0])),
             nominal_configuration=np.deg2rad(np.array([0.0, 180.0])),
-            narrow_configuration=np.deg2rad(np.array([-35.0, 145.0])),
             symmetry_coupling=np.array([-1.0, 1.0], dtype=float),
-            narrow_body_yaw=np.deg2rad(35.0),
         )
 
     def __post_init__(self) -> None:
@@ -94,24 +88,18 @@ class RobotParameters:
             raise ValueError("track_center_offsets must have shape (2, 2)")
         if self.q_min.shape != (2,) or self.q_max.shape != (2,):
             raise ValueError("q_min and q_max must have shape (2,)")
-        if self.narrow_configuration.shape != (2,):
-            raise ValueError("narrow_configuration must have shape (2,)")
         if self.nominal_configuration.shape != (2,):
             raise ValueError("nominal_configuration must have shape (2,)")
         if self.symmetry_coupling.shape != (2,):
             raise ValueError("symmetry_coupling must have shape (2,)")
         if np.linalg.norm(self.symmetry_coupling) <= 0.0:
             raise ValueError("symmetry_coupling must be non-zero")
-        if not np.isfinite(self.narrow_body_yaw):
-            raise ValueError("narrow_body_yaw must be finite")
         if np.any(self.q_min >= self.q_max):
             raise ValueError("Every q_min must be lower than q_max")
-        for name, configuration in (
-            ("nominal_configuration", self.nominal_configuration),
-            ("narrow_configuration", self.narrow_configuration),
+        if np.any(self.nominal_configuration < self.q_min) or np.any(
+            self.nominal_configuration > self.q_max
         ):
-            if np.any(configuration < self.q_min) or np.any(configuration > self.q_max):
-                raise ValueError(f"{name} must lie inside the articulation limits")
+            raise ValueError("nominal_configuration must lie inside the articulation limits")
 
 
 @dataclass(frozen=True)

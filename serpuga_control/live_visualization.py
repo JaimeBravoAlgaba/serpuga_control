@@ -571,7 +571,10 @@ class LiveSimulationPlayer:
         )
 
     def _track_direction_segment(
-        self, state: np.ndarray, track_index: int
+        self,
+        state: np.ndarray,
+        track_index: int,
+        track_speed: float = 1.0,
     ) -> tuple[np.ndarray, np.ndarray]:
         yaw = state[2]
         rotation = np.array(
@@ -587,7 +590,8 @@ class LiveSimulationPlayer:
             [np.cos(state[3 + track_index]), np.sin(state[3 + track_index])],
             dtype=float,
         )
-        end_world = centre_world + 0.13 * (rotation @ local_direction)
+        direction_sign = -1.0 if track_speed < 0.0 else 1.0
+        end_world = centre_world + 0.13 * direction_sign * (rotation @ local_direction)
         return centre_world, end_world
 
     def _render_frame(self, *, force_draw: bool = False) -> None:
@@ -596,6 +600,11 @@ class LiveSimulationPlayer:
         current_time = self._state_times[index]
         telemetry_index = min(index, self.log.times.size - 1)
         measurement_stop = min(index + 1, self.log.times.size)
+        track_speeds = (
+            self.log.controls[telemetry_index, 0:2]
+            if self.log.controls.size
+            else np.ones(2, dtype=float)
+        )
 
         self.executed_path.set_data(
             self.log.states[: index + 1, 0],
@@ -616,7 +625,11 @@ class LiveSimulationPlayer:
                     self.robot.track_vertices_world(state, track_index), dtype=float
                 )
             )
-            start, end = self._track_direction_segment(state, track_index)
+            start, end = self._track_direction_segment(
+                state,
+                track_index,
+                float(track_speeds[track_index]),
+            )
             self.direction_lines[track_index].set_data(
                 [start[0], end[0]], [start[1], end[1]]
             )
@@ -665,6 +678,7 @@ class LiveSimulationPlayer:
         q_degrees = np.rad2deg(state[3:5])
         slip_values = self._slip_magnitude[telemetry_index]
         self.telemetry_text.set_text(
+            f"v1, v2  {track_speeds[0]: .3f}, {track_speeds[1]: .3f} m/s\n"
             f"v       {self._forward_speed[telemetry_index]: .3f} / "
             f"{self.log.reference_speeds[telemetry_index]:.3f} m/s\n"
             f"omega   {self.log.body_twists[telemetry_index, 2]: .3f} / "

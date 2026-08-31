@@ -12,6 +12,7 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
   el centro de la huella;
 - cinemática predictiva con `v1`, `v2`, `q1_dot` y `q2_dot`, sin un twist
   omnidireccional independiente;
+- velocidades de banda firmadas, permitiendo avance y retroceso por oruga;
 - deslizamiento longitudinal, lateral y término de *scrubbing*;
 - NMPC de disparo múltiple implementado con CasADi/IPOPT;
 - restricciones sobre todos los vértices del robot;
@@ -19,7 +20,9 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 - estabilidad lateral geométrica o mediante ZMP aproximado;
 - aplicación gráfica con configuración completa y perfiles YAML;
 - simulación online: cada paso MPC se resuelve, aplica y dibuja inmediatamente;
-- ejecución, pausa, reanudación y parada sin precalcular la trayectoria ejecutada.
+- teleoperación manual en vivo con consignas articulares y velocidades de oruga;
+- carga de parámetros, pausa, reanudación y parada sin precalcular la trayectoria
+  ejecutada.
 
 ## Estructura
 
@@ -71,19 +74,26 @@ Desde la raíz del repositorio:
 python -m serpuga_control
 ```
 
-La ventana se abre con el robot y el corredor ya inicializados. A la derecha
-aparecen cuatro pestañas:
+La ventana se abre con el robot, el corredor y la simulación online ya
+inicializados. A la derecha aparecen cuatro pestañas:
 
 - **Robot**: geometría, masas, articulaciones, actuadores y pesos de contacto;
 - **Escenario**: anchuras, posición y transición del hueco;
 - **Simulación**: estado inicial, duración y referencias constantes `v` y `ω`;
 - **MPC**: horizonte, costes, restricciones, ZMP y opciones de IPOPT.
 
-Al pulsar **Ejecutar**, la aplicación construye el controlador con los valores
-visibles. Después resuelve una única iteración, aplica ese control al modelo y
-actualiza la figura antes de pasar a la siguiente. No existe un cálculo previo
-de toda la ejecución. Si una iteración tarda más que el periodo configurado, la
-barra inferior muestra el ritmo real alcanzado en lugar de ocultar el retraso.
+La simulación corre en tiempo real desde que se carga un perfil. El panel de
+**Teleoperación** permite activar **Modo manual**, que deja de resolver el MPC y
+aplica directamente las velocidades `v1`, `v2` y las consignas articulares
+`q1`, `q2` en el siguiente periodo de control. En manual, la simulación no se
+detiene por `duration` ni por `stop_x`.
+
+Al pulsar **Cargar parámetros**, la aplicación reconstruye la sesión con los
+valores visibles en las pestañas. Después resuelve una única iteración, aplica
+ese control al modelo y actualiza la figura antes de pasar a la siguiente. No
+existe un cálculo previo de toda la ejecución. Si una iteración tarda más que el
+periodo configurado, la barra inferior muestra el ritmo real alcanzado en lugar
+de ocultar el retraso.
 
 ## Configuraciones YAML
 

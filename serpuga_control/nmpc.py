@@ -49,6 +49,7 @@ class NMPCController:
         self._last_states: np.ndarray | None = None
         self._last_controls: np.ndarray | None = None
         self._last_duals: np.ndarray | None = None
+        self._clearance_seed_cache: dict[tuple[float, float], np.ndarray] = {}
         self._build_problem()
 
     def _build_problem(self) -> None:
@@ -151,12 +152,11 @@ class NMPCController:
             )
             position_error = state[0:2] - self.reference_poses[0:2, step]
             heading_error = state[2] - desired_heading
-            self.opti.subject_to(
-                self.opti.bounded(
-                    -p.maximum_heading_error,
-                    heading_error,
-                    p.maximum_heading_error,
-                )
+            heading_excess = smooth_max(
+                ca.sqrt(heading_error**2 + p.smooth_epsilon**2)
+                - p.maximum_heading_error,
+                0.0,
+                p.smooth_epsilon,
             )
             velocity_error = world_velocity - desired_world_velocity
             yaw_rate_error = twist[2] - self.reference_yaw_rates[0, step]
@@ -172,6 +172,7 @@ class NMPCController:
 
             objective += p.position_weight * ca.sumsqr(position_error)
             objective += p.heading_weight * 2.0 * (1.0 - ca.cos(heading_error))
+            objective += p.heading_weight * heading_excess**2
             objective += p.velocity_weight * ca.sumsqr(velocity_error)
             objective += p.yaw_rate_weight * yaw_rate_error**2
             objective += p.slip_weight * slip_cost
@@ -288,16 +289,11 @@ class NMPCController:
         state_guess[0:3] = preview.poses.T
         state_guess[:, 0] = state
 
-        narrowing = np.asarray(
-            [self.corridor.narrowing_factor(x) for x in preview.poses[:, 0]],
-            dtype=float,
-        )
-        fold_fraction = np.clip(0.88 * narrowing, 0.0, 0.92)
-        for index in range(2):
-            state_guess[3 + index] = r.nominal_configuration[index] + fold_fraction * (
-                r.narrow_configuration[index] - r.nominal_configuration[index]
+        state_guess[2] = preview.poses[:, 2]
+        for step in range(n + 1):
+            state_guess[3:5, step] = self._clearance_seed_configuration(
+                preview.poses[step]
             )
-        state_guess[2] = preview.poses[:, 2] + fold_fraction * r.narrow_body_yaw
         state_guess[3:5, 0] = state[3:5]
         state_guess[2, 0] = state[2]
 
@@ -350,25 +346,76 @@ class NMPCController:
                 -r.track_speed_limit,
                 r.track_speed_limit,
             )
+        state_guess[:, 0] = state
+        for step in range(n):
+            state_guess[:, step + 1] = np.asarray(
+                self.model.discrete_step(state_guess[:, step], control_guess[:, step]),
+                dtype=float,
+            ).reshape(self.state_dimension)
         return state_guess, control_guess
+
+    def _clearance_seed_configuration(self, pose: np.ndarray) -> np.ndarray:
+        r = self.robot.parameters
+        state = np.r_[pose, r.nominal_configuration]
+        path_normal = np.array([-np.sin(pose[2]), np.cos(pose[2])], dtype=float)
+        available_width = (
+            float(self.corridor.full_width(float(pose[0])))
+            - 2.0 * self.parameters.clearance_margin
+        )
+        nominal_width = self.robot.envelope_width(state, path_normal)
+        if nominal_width <= available_width:
+            return r.nominal_configuration.copy()
+
+        cache_key = (round(float(pose[2]), 4), round(available_width, 4))
+        cached = self._clearance_seed_cache.get(cache_key)
+        if cached is not None:
+            return cached.copy()
+
+        q1_values = np.linspace(r.q_min[0], r.q_max[0], 41)
+        q2_values = np.linspace(r.q_min[1], r.q_max[1], 41)
+        symmetry_reference = float(
+            np.dot(r.symmetry_coupling, r.nominal_configuration)
+        )
+        best_q: np.ndarray | None = None
+        best_cost = float("inf")
+        narrowest_q = r.nominal_configuration.copy()
+        narrowest_width = nominal_width
+        for q1 in q1_values:
+            for q2 in q2_values:
+                q = np.array([q1, q2], dtype=float)
+                state[3:5] = q
+                width = self.robot.envelope_width(state, path_normal)
+                distance_cost = float(np.sum((q - r.nominal_configuration) ** 2))
+                symmetry_error = float(
+                    np.dot(r.symmetry_coupling, q) - symmetry_reference
+                )
+                cost = distance_cost + 0.2 * symmetry_error**2
+                if width < narrowest_width or (
+                    np.isclose(width, narrowest_width) and cost < best_cost
+                ):
+                    narrowest_width = width
+                    narrowest_q = q.copy()
+                if width <= available_width and cost < best_cost:
+                    best_cost = cost
+                    best_q = q.copy()
+
+        selected = narrowest_q if best_q is None else best_q
+        self._clearance_seed_cache[cache_key] = selected.copy()
+        return selected
 
     def _apply_warm_start(
         self,
         state: np.ndarray,
         preview: ReferencePreview,
     ) -> None:
-        preview_narrowing = np.asarray(
-            [self.corridor.narrowing_factor(x) for x in preview.poses[:, 0]],
-            dtype=float,
-        )
-        use_geometric_seed = (
-            abs(self.robot.parameters.narrow_body_yaw) > 1.0e-9
-            and float(np.max(preview_narrowing)) > 0.02
+        needs_clearance_seed = any(
+            self._nominal_configuration_exceeds_clearance(pose)
+            for pose in preview.poses
         )
         if (
             self._last_states is None
             or self._last_controls is None
-            or use_geometric_seed
+            or needs_clearance_seed
         ):
             state_guess, control_guess = self._initial_guess(state, preview)
         else:
@@ -385,6 +432,16 @@ class NMPCController:
         self._current_control_guess = control_guess
         # Primal shifting is substantially more robust here than reusing duals:
         # the active wall changes as individual vertices enter/leave the gap.
+
+    def _nominal_configuration_exceeds_clearance(self, pose: np.ndarray) -> bool:
+        r = self.robot.parameters
+        state = np.r_[pose, r.nominal_configuration]
+        path_normal = np.array([-np.sin(pose[2]), np.cos(pose[2])], dtype=float)
+        available_width = (
+            float(self.corridor.full_width(float(pose[0])))
+            - 2.0 * self.parameters.clearance_margin
+        )
+        return self.robot.envelope_width(state, path_normal) > available_width
 
     def _evaluate_twists(
         self,

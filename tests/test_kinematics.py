@@ -25,6 +25,18 @@ def test_equal_parallel_track_speeds_generate_straight_motion() -> None:
     )
 
 
+def test_negative_parallel_track_speeds_generate_reverse_motion() -> None:
+    model = make_model()
+    control = np.array([-0.4, -0.4, 0.0, 0.0])
+    twist = model.body_twist(np.zeros(2), control)
+    np.testing.assert_allclose(twist, [-0.4, 0.0, 0.0], atol=1.0e-6)
+    np.testing.assert_allclose(
+        model.slip_components(np.zeros(2), control, twist),
+        0.0,
+        atol=1.0e-6,
+    )
+
+
 def test_parallel_speed_difference_produces_yaw() -> None:
     model = make_model()
     twist = model.body_twist(np.zeros(2), np.array([0.2, 0.6, 0.0, 0.0]))

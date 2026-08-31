@@ -250,7 +250,10 @@ class OnlineSimulationPlot:
         self.safety.legend(loc="upper right", frameon=False, fontsize=7, ncol=2)
 
     def _track_segment(
-        self, state: np.ndarray, track_index: int
+        self,
+        state: np.ndarray,
+        track_index: int,
+        track_speed: float = 1.0,
     ) -> tuple[np.ndarray, np.ndarray]:
         yaw = state[2]
         rotation = np.array(
@@ -263,17 +266,24 @@ class OnlineSimulationPlot:
         local_direction = np.array(
             [np.cos(state[3 + track_index]), np.sin(state[3 + track_index])]
         )
-        return centre, centre + 0.13 * rotation @ local_direction
+        direction_sign = -1.0 if track_speed < 0.0 else 1.0
+        return centre, centre + 0.13 * direction_sign * (rotation @ local_direction)
 
-    def _update_robot(self, state: np.ndarray) -> None:
+    def _update_robot(
+        self,
+        state: np.ndarray,
+        track_speeds: np.ndarray | None = None,
+    ) -> None:
         self.connector_patch.set_xy(
             np.asarray(self.robot.connector_vertices_world(state), dtype=float)
         )
+        if track_speeds is None:
+            track_speeds = np.ones(2, dtype=float)
         for index, patch in enumerate(self.track_patches):
             patch.set_xy(
                 np.asarray(self.robot.track_vertices_world(state, index), dtype=float)
             )
-            start, end = self._track_segment(state, index)
+            start, end = self._track_segment(state, index, float(track_speeds[index]))
             self.direction_lines[index].set_data([start[0], end[0]], [start[1], end[1]])
         centre_of_mass = np.asarray(self.robot.centre_of_mass_world(state), dtype=float)
         self.com_marker.set_data([centre_of_mass[0]], [centre_of_mass[1]])
@@ -300,11 +310,40 @@ class OnlineSimulationPlot:
             centre = 0.5 * (low + high)
             axis.set_ylim(centre - 0.5 * minimum_span, centre + 0.5 * minimum_span)
 
+    def _expand_time_axis(self, current_time: float) -> None:
+        _, high = self.tracking.get_xlim()
+        if current_time <= high:
+            return
+        new_high = current_time + self.configuration.mpc.dt
+        self.tracking.set_xlim(0.0, new_high)
+        self.safety.set_xlim(0.0, new_high)
+
+    def _expand_scene_to_state(self, state: np.ndarray) -> None:
+        x_low, x_high = self.scene.get_xlim()
+        y_low, y_high = self.scene.get_ylim()
+        x_margin = 0.45
+        y_margin = 0.35
+        new_x_low = min(x_low, float(state[0]) - x_margin)
+        new_x_high = max(x_high, float(state[0]) + x_margin)
+        new_y_low = min(y_low, float(state[1]) - y_margin)
+        new_y_high = max(y_high, float(state[1]) + y_margin)
+        if (
+            new_x_low != x_low
+            or new_x_high != x_high
+            or new_y_low != y_low
+            or new_y_high != y_high
+        ):
+            self.scene.set_xlim(new_x_low, new_x_high)
+            self.scene.set_ylim(new_y_low, new_y_high)
+
     def update_log(self, log: SimulationLog) -> None:
         if log.times.size == 0:
             return
         state = log.states[-1]
-        self._update_robot(state)
+        current_control = log.controls[-1]
+        self._expand_scene_to_state(state)
+        self._expand_time_axis(float(log.times[-1] + self.configuration.mpc.dt))
+        self._update_robot(state, current_control[0:2])
         self.executed_path.set_data(log.states[:, 0], log.states[:, 1])
         prediction = log.predicted_states[-1]
         self.predicted_path.set_data(prediction[:, 0], prediction[:, 1])
@@ -328,8 +367,11 @@ class OnlineSimulationPlot:
 
         q = np.rad2deg(state[3:5])
         index = -1
+        mode = log.control_modes[index] if log.control_modes else "mpc"
+        label = "MANUAL" if mode == "manual" else "ONLINE"
         self.telemetry.set_text(
-            f"ONLINE · t={log.times[index] + self.configuration.mpc.dt:05.2f} s\n"
+            f"{label} · t={log.times[index] + self.configuration.mpc.dt:05.2f} s\n"
+            f"v1, v2  {current_control[0]: .3f}, {current_control[1]: .3f} m/s\n"
             f"v       {forward_speed[index]: .3f} / {log.reference_speeds[index]:.3f} m/s\n"
             f"omega   {log.body_twists[index, 2]: .3f} / "
             f"{log.reference_yaw_rates[index]:.3f} rad/s\n"

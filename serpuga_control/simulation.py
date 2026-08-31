@@ -2,16 +2,39 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from .config import MPCParameters, SimulationParameters
 from .corridor import StraightGapCorridor
 from .kinematics import KinematicModel
-from .nmpc import NMPCController
+from .nmpc import NMPCController, NMPCSolution
 from .robot import RobotDescription
 from .trajectory import ReferenceTrajectory, wrapped_angle_error
+
+
+@dataclass
+class TeleoperationCommand:
+    """Live manual command applied instead of the NMPC solution when enabled."""
+
+    enabled: bool = False
+    track_speeds: np.ndarray = field(default_factory=lambda: np.zeros(2, dtype=float))
+    articulation_targets: np.ndarray = field(
+        default_factory=lambda: np.zeros(2, dtype=float)
+    )
+
+    def __post_init__(self) -> None:
+        track_speeds = np.nan_to_num(
+            np.asarray(self.track_speeds, dtype=float).reshape(2),
+            nan=0.0,
+        )
+        articulation_targets = np.nan_to_num(
+            np.asarray(self.articulation_targets, dtype=float).reshape(2),
+            nan=0.0,
+        )
+        self.track_speeds = track_speeds
+        self.articulation_targets = articulation_targets
 
 
 @dataclass
@@ -34,6 +57,7 @@ class SimulationLog:
     solver_statuses: list[str]
     predicted_states: list[np.ndarray]
     completed: bool
+    control_modes: list[str] = field(default_factory=list)
 
     def summary(self) -> dict[str, float | bool]:
         position_error = self.states[:-1, 0:2] - self.reference_poses[:, 0:2]
@@ -122,6 +146,7 @@ class ClosedLoopSession:
         self.solve_times: list[float] = []
         self.objectives: list[float] = []
         self.statuses: list[str] = []
+        self.control_modes: list[str] = []
         self.predictions: list[np.ndarray] = []
 
         self.finished = False
@@ -132,7 +157,75 @@ class ClosedLoopSession:
     def current_time(self) -> float:
         return len(self.times) * self.dt
 
-    def step(self) -> bool:
+    def _manual_control_for_state(
+        self,
+        state: np.ndarray,
+        command: TeleoperationCommand,
+    ) -> np.ndarray:
+        r = self.robot.parameters
+        track_speeds = np.clip(
+            command.track_speeds,
+            -r.track_speed_limit,
+            r.track_speed_limit,
+        )
+        articulation_targets = np.clip(
+            command.articulation_targets,
+            r.q_min,
+            r.q_max,
+        )
+        articulation_rates = np.clip(
+            (articulation_targets - state[3:5]) / self.dt,
+            -r.articulation_rate_limit,
+            r.articulation_rate_limit,
+        )
+        return np.r_[track_speeds, articulation_rates]
+
+    def _manual_solution(self, command: TeleoperationCommand) -> NMPCSolution:
+        control = self._manual_control_for_state(self.state, command)
+        body_twist = np.asarray(
+            self.model.body_twist(self.state[3:5], control),
+            dtype=float,
+        ).reshape(3)
+        prediction_state = self.state.copy()
+        predicted_states = [prediction_state.copy()]
+        predicted_controls = []
+        predicted_twists = []
+        for _ in range(self.mpc_parameters.horizon_steps):
+            prediction_control = self._manual_control_for_state(
+                prediction_state,
+                command,
+            )
+            prediction_twist = np.asarray(
+                self.model.body_twist(prediction_state[3:5], prediction_control),
+                dtype=float,
+            ).reshape(3)
+            prediction_state = np.asarray(
+                self.model.discrete_step(prediction_state, prediction_control),
+                dtype=float,
+            ).reshape(5)
+            predicted_controls.append(prediction_control.copy())
+            predicted_twists.append(prediction_twist.copy())
+            predicted_states.append(prediction_state.copy())
+        return NMPCSolution(
+            success=True,
+            control=control,
+            body_twist=body_twist,
+            predicted_states=np.asarray(predicted_states, dtype=float),
+            predicted_controls=np.asarray(predicted_controls, dtype=float).reshape(
+                (-1, 4)
+            ),
+            predicted_twists=np.asarray(predicted_twists, dtype=float).reshape((-1, 3)),
+            objective=0.0,
+            solve_time=0.0,
+            status="Teleoperation",
+        )
+
+    def step(
+        self,
+        command: TeleoperationCommand | None = None,
+        *,
+        stop_when_complete: bool = True,
+    ) -> bool:
         """Solve and apply one MPC interval; return whether it succeeded."""
 
         if self.finished:
@@ -144,12 +237,18 @@ class ClosedLoopSession:
             self.dt,
             self.mpc_parameters.horizon_steps,
         )
-        solution = self.controller.solve(
-            self.state,
-            preview,
-            self.previous_control,
-            self.previous_world_velocity,
-        )
+        manual_enabled = command is not None and command.enabled
+        if manual_enabled:
+            solution = self._manual_solution(command)
+            control_mode = "manual"
+        else:
+            solution = self.controller.solve(
+                self.state,
+                preview,
+                self.previous_control,
+                self.previous_world_velocity,
+            )
+            control_mode = "mpc"
         if not solution.success:
             self.finished = True
             self.completed = False
@@ -208,6 +307,7 @@ class ClosedLoopSession:
         self.solve_times.append(solution.solve_time)
         self.objectives.append(solution.objective)
         self.statuses.append(solution.status)
+        self.control_modes.append(control_mode)
         self.predictions.append(solution.predicted_states.copy())
 
         next_state = np.asarray(
@@ -223,7 +323,7 @@ class ClosedLoopSession:
             and self.state[0] >= self.simulation_parameters.stop_position
         )
         exhausted_duration = len(self.times) >= self.maximum_steps
-        if reached_stop or exhausted_duration:
+        if stop_when_complete and (reached_stop or exhausted_duration):
             self.finished = True
             self.completed = bool(
                 reached_stop or self.simulation_parameters.stop_position is None
@@ -256,6 +356,7 @@ class ClosedLoopSession:
             solver_statuses=list(self.statuses),
             predicted_states=[prediction.copy() for prediction in self.predictions],
             completed=bool(self.completed),
+            control_modes=list(self.control_modes),
         )
 
 

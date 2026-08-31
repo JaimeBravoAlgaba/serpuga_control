@@ -51,6 +51,9 @@ La velocidad impuesta por cada banda es siempre longitudinal:
 v_i e_i(q_i).
 \]
 
+El signo de \(v_i\) es físico: valores positivos y negativos representan el
+avance o retroceso de cada banda sobre su propio eje longitudinal.
+
 El twist utilizado en la dinámica se calcula como
 
 \[
@@ -98,7 +101,7 @@ de suelo plano y altura constante, no un modelo dinámico de vuelco.
 
 1. Geometría del corredor y límites articulares.
 2. Margen mínimo de estabilidad.
-3. Seguimiento de pose, velocidad y velocidad angular.
+3. Seguimiento de posición, orientación, velocidad y velocidad angular.
 4. Deslizamiento, *scrubbing* y suavidad de los comandos.
 
 Los parámetros geométricos incluidos son ilustrativos. Antes de pasar al robot
@@ -116,11 +119,24 @@ Los parámetros de una ejecución se agrupan en un único perfil YAML con cuatro
 secciones: `robot`, `scenario`, `simulation` y `mpc`. Las magnitudes angulares
 de geometría se expresan en grados en el archivo y se convierten internamente a
 radianes. La referencia se define mediante una velocidad lineal y una velocidad
-angular constantes, integradas desde la pose inicial para construir el horizonte
-de referencia.
+angular constantes, integradas desde el `x,y` inicial y con orientación de
+referencia inicial alineada con el corredor.
 
 La aplicación gráfica utiliza una sesión de bucle cerrado persistente. Cada
 llamada resuelve solamente el horizonte correspondiente al instante actual,
 aplica el primer comando, integra un periodo y publica inmediatamente el nuevo
 estado al visualizador. El historial se conserva para las gráficas y la
 exportación, pero no se calcula antes de comenzar la animación.
+
+No se configura una postura especial de entrada al hueco. El plegado de las
+orugas es una decisión del NMPC causada por las restricciones geométricas,
+estabilidad, deslizamiento, límites articulares y costes de actuación. La
+semilla numérica del solver solo usa la anchura disponible y los límites
+articulares para encontrar un punto inicial factible cuando la configuración
+nominal no cabe.
+
+El yaw inicial pertenece al estado del robot. No rota la referencia de posición:
+la referencia traslacional empieza en el mismo `x,y` y avanza por el eje del
+corredor. El umbral de orientación del MPC es blando, de forma que una
+orientación inicial distinta penaliza el objetivo pero no hace infeasible el
+primer paso.

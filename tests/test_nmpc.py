@@ -67,3 +67,28 @@ def test_opposed_tracks_use_opposite_belt_speeds_for_forward_motion() -> None:
         projected_twist,
         atol=1.0e-9,
     )
+
+
+def test_initial_yaw_offset_does_not_make_controller_infeasible() -> None:
+    parameters = MPCParameters(horizon_steps=3)
+    robot = RobotDescription(RobotParameters())
+    model = KinematicModel(robot, parameters)
+    corridor = StraightGapCorridor(
+        open_width=2.0,
+        gap_width=2.0,
+        gap_start=10.0,
+        gap_end=11.0,
+    )
+    controller = NMPCController(robot, model, corridor, parameters)
+    trajectory = ReferenceTrajectory.straight(1.0, parameters.dt, 0.25)
+    state = np.zeros(5)
+    state[2] = np.deg2rad(90.0)
+
+    solution = controller.solve(
+        state=state,
+        preview=trajectory.preview(0.0, parameters.dt, parameters.horizon_steps),
+        previous_control=np.zeros(4),
+        previous_world_velocity=np.zeros(2),
+    )
+
+    assert solution.success

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from .configuration import ApplicationConfiguration
 from .kinematics import KinematicModel
 from .nmpc import NMPCController
@@ -14,12 +16,16 @@ from .trajectory import ReferenceTrajectory
 def build_trajectory(configuration: ApplicationConfiguration) -> ReferenceTrajectory:
     p = configuration.mpc
     s = configuration.simulation
+    initial_reference_pose = np.array(
+        [s.initial_state[0], s.initial_state[1], 0.0],
+        dtype=float,
+    )
     return ReferenceTrajectory.constant_twist(
         duration=s.duration + p.horizon_time,
         integration_dt=p.dt,
         speed=s.desired_speed,
         yaw_rate=s.desired_yaw_rate,
-        initial_pose=s.initial_state[0:3],
+        initial_pose=initial_reference_pose,
     )
 
 
