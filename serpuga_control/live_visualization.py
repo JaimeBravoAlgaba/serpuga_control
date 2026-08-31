@@ -303,7 +303,9 @@ class LiveSimulationPlayer:
             zorder=12,
         )
 
-        self.scene.set_title("Vista superior · estado actual", loc="left", color=COLOURS["ink"])
+        self.scene.set_title(
+            "Vista superior · estado actual", loc="left", color=COLOURS["ink"]
+        )
         self.scene.set_xlabel("x [m]", color=COLOURS["muted"])
         self.scene.set_ylabel("y [m]", color=COLOURS["muted"])
         self.scene.set_xlim(x_min, x_max)
@@ -325,7 +327,9 @@ class LiveSimulationPlayer:
         (self.q2_line,) = self.configuration.plot(
             [], [], color=COLOURS["violet"], linewidth=2.0, label=r"$q_2$"
         )
-        self.configuration.set_title("Configuración y anchura", loc="left", color=COLOURS["ink"])
+        self.configuration.set_title(
+            "Configuración y anchura", loc="left", color=COLOURS["ink"]
+        )
         self.configuration.set_ylabel("Ángulo [deg]", color=COLOURS["muted"])
         self.configuration.set_xlim(0.0, max(self.dt, self._state_times[-1]))
         q_degrees = np.rad2deg(self.log.states[:, 3:5])
@@ -384,7 +388,9 @@ class LiveSimulationPlayer:
         (self.speed_line,) = self.tracking.plot(
             [], [], color=COLOURS["teal_dark"], linewidth=2.0, label=r"$v$"
         )
-        self.tracking.set_title("Seguimiento de velocidad", loc="left", color=COLOURS["ink"])
+        self.tracking.set_title(
+            "Seguimiento de velocidad", loc="left", color=COLOURS["ink"]
+        )
         self.tracking.set_ylabel("v [m/s]", color=COLOURS["muted"])
         self.tracking.set_xlim(0.0, max(self.dt, self._state_times[-1]))
         speed_values = np.concatenate((self.log.reference_speeds, self._forward_speed))
@@ -464,9 +470,13 @@ class LiveSimulationPlayer:
             )
         )
         diagnostic_maximum = max(0.08, float(np.max(diagnostic_values)) * 1.15)
-        self.diagnostics.set_ylim(min(-0.01, float(np.min(diagnostic_values))), diagnostic_maximum)
+        self.diagnostics.set_ylim(
+            min(-0.01, float(np.min(diagnostic_values))), diagnostic_maximum
+        )
         self.diagnostics.set_xlim(0.0, max(self.dt, self._state_times[-1]))
-        self.diagnostics.set_title("Deslizamiento y seguridad", loc="left", color=COLOURS["ink"])
+        self.diagnostics.set_title(
+            "Deslizamiento y seguridad", loc="left", color=COLOURS["ink"]
+        )
         self.diagnostics.set_xlabel("Tiempo [s]", color=COLOURS["muted"])
         self.diagnostics.set_ylabel("m o m/s", color=COLOURS["muted"])
         self._style_axis(self.diagnostics)
@@ -489,7 +499,9 @@ class LiveSimulationPlayer:
         self.progress_axis.set_ylim(0.0, 1.0)
         self.progress_axis.axis("off")
         self.progress_axis.add_patch(
-            Rectangle((0.0, 0.16), 1.0, 0.68, facecolor=COLOURS["grid"], edgecolor="none")
+            Rectangle(
+                (0.0, 0.16), 1.0, 0.68, facecolor=COLOURS["grid"], edgecolor="none"
+            )
         )
         self.progress_patch = Rectangle(
             (0.0, 0.16),
@@ -513,7 +525,12 @@ class LiveSimulationPlayer:
             [start_x + button_width + gap, button_y, button_width, button_height]
         )
         self.forward_axis = self.figure.add_axes(
-            [start_x + 2.0 * (button_width + gap), button_y, button_width, button_height]
+            [
+                start_x + 2.0 * (button_width + gap),
+                button_y,
+                button_width,
+                button_height,
+            ]
         )
         self.backward_button = Button(
             self.backward_axis,
@@ -620,7 +637,9 @@ class LiveSimulationPlayer:
         self.corridor_width_line.set_data(
             measurement_times, self.log.corridor_widths[:measurement_stop]
         )
-        self.speed_line.set_data(measurement_times, self._forward_speed[:measurement_stop])
+        self.speed_line.set_data(
+            measurement_times, self._forward_speed[:measurement_stop]
+        )
         self.yaw_rate_line.set_data(
             measurement_times, self.log.body_twists[:measurement_stop, 2]
         )
@@ -729,7 +748,9 @@ class LiveSimulationPlayer:
         if self._timer is not None:
             self._timer.stop()
 
-    def save_frame(self, output_path: str | Path, frame_index: int | None = None) -> Path:
+    def save_frame(
+        self, output_path: str | Path, frame_index: int | None = None
+    ) -> Path:
         """Save one frame of the live UI, including its playback controls."""
 
         output = Path(output_path)
@@ -783,7 +804,9 @@ class LiveSimulationPlayer:
                 "Matplotlib is using a non-interactive backend. Run on a desktop "
                 "with Tk/Qt support, or pass --headless for a console-only run."
             )
-        self._timer = self.figure.canvas.new_timer(interval=max(1, round(1000 * self.dt)))
+        self._timer = self.figure.canvas.new_timer(
+            interval=max(1, round(1000 * self.dt))
+        )
         self._timer.add_callback(self._on_timer)
         self._timer.start()
         plt.show()

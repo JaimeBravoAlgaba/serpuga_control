@@ -16,4 +16,3 @@ def test_corridor_preview_is_vectorised() -> None:
     values = corridor.preview(np.linspace(0.0, 3.0, 20))
     assert values.shape == (20,)
     assert np.all(values >= corridor.gap_width - 1.0e-9)
-

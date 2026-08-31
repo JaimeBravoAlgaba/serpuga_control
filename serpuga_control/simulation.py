@@ -52,17 +52,11 @@ class SimulationLog:
                 if self.times.size > 1
                 else 0.0
             ),
-            "maximum_lateral_slip_mps": float(
-                np.max(np.abs(self.slips[:, :, 1]))
-            ),
+            "maximum_lateral_slip_mps": float(np.max(np.abs(self.slips[:, :, 1]))),
             "minimum_clearance_m": float(np.min(self.clearances)),
             "minimum_stability_margin_m": float(np.min(self.stability_margins)),
             "maximum_fold_deg": float(
-                np.max(
-                    np.abs(
-                        np.rad2deg(self.states[:, 3:5] - self.states[0, 3:5])
-                    )
-                )
+                np.max(np.abs(np.rad2deg(self.states[:, 3:5] - self.states[0, 3:5])))
             ),
             "mean_solve_time_s": float(np.mean(self.solve_times)),
             "maximum_solve_time_s": float(np.max(self.solve_times)),
@@ -81,6 +75,190 @@ def _minimum_clearance(
     return float(min(clearances))
 
 
+class ClosedLoopSession:
+    """Stateful receding-horizon simulation that advances exactly one step.
+
+    The GUI calls :meth:`step` from its worker thread and redraws the returned
+    history immediately.  No future control solution is precomputed.
+    """
+
+    def __init__(
+        self,
+        controller: NMPCController,
+        model: KinematicModel,
+        robot: RobotDescription,
+        corridor: StraightGapCorridor,
+        trajectory: ReferenceTrajectory,
+        mpc_parameters: MPCParameters,
+        simulation_parameters: SimulationParameters,
+    ) -> None:
+        self.controller = controller
+        self.model = model
+        self.robot = robot
+        self.corridor = corridor
+        self.trajectory = trajectory
+        self.mpc_parameters = mpc_parameters
+        self.simulation_parameters = simulation_parameters
+
+        self.dt = float(mpc_parameters.dt)
+        self.maximum_steps = int(np.ceil(simulation_parameters.duration / self.dt))
+        self.state = simulation_parameters.initial_state.astype(float).copy()
+        self.previous_control = np.zeros(4, dtype=float)
+        self.previous_world_velocity = np.zeros(2, dtype=float)
+
+        self.states: list[np.ndarray] = [self.state.copy()]
+        self.times: list[float] = []
+        self.controls: list[np.ndarray] = []
+        self.reference_poses: list[np.ndarray] = []
+        self.reference_speeds: list[float] = []
+        self.reference_yaw_rates: list[float] = []
+        self.body_twists: list[np.ndarray] = []
+        self.world_velocities: list[np.ndarray] = []
+        self.slips: list[np.ndarray] = []
+        self.stability_margins: list[float] = []
+        self.clearances: list[float] = []
+        self.robot_widths: list[float] = []
+        self.corridor_widths: list[float] = []
+        self.solve_times: list[float] = []
+        self.objectives: list[float] = []
+        self.statuses: list[str] = []
+        self.predictions: list[np.ndarray] = []
+
+        self.finished = False
+        self.completed = False
+        self.failure_status: str | None = None
+
+    @property
+    def current_time(self) -> float:
+        return len(self.times) * self.dt
+
+    def step(self) -> bool:
+        """Solve and apply one MPC interval; return whether it succeeded."""
+
+        if self.finished:
+            return False
+
+        current_time = self.current_time
+        preview = self.trajectory.preview(
+            current_time,
+            self.dt,
+            self.mpc_parameters.horizon_steps,
+        )
+        solution = self.controller.solve(
+            self.state,
+            preview,
+            self.previous_control,
+            self.previous_world_velocity,
+        )
+        if not solution.success:
+            self.finished = True
+            self.completed = False
+            self.failure_status = solution.status
+            self.statuses.append(solution.status)
+            return False
+
+        control = solution.control
+        twist = solution.body_twist.copy()
+        world_velocity = np.asarray(
+            self.model.world_velocity_from_twist(self.state, twist), dtype=float
+        ).reshape(2)
+        slip = np.asarray(
+            self.model.slip_components(self.state[3:5], control, twist),
+            dtype=float,
+        )
+        world_acceleration = (world_velocity - self.previous_world_velocity) / self.dt
+        centre_of_mass = np.asarray(
+            self.robot.centre_of_mass_world(self.state), dtype=float
+        )
+        evaluation_point = centre_of_mass
+        if self.mpc_parameters.use_zmp:
+            evaluation_point = (
+                centre_of_mass
+                - self.robot.parameters.com_height
+                / self.mpc_parameters.gravity
+                * world_acceleration
+            )
+        path_normal = np.array(
+            [-np.sin(preview.poses[0, 2]), np.cos(preview.poses[0, 2])],
+            dtype=float,
+        )
+        _, _, stability_margin = self.robot.lateral_stability_margins(
+            self.state,
+            path_normal,
+            evaluation_point,
+            self.mpc_parameters.smooth_epsilon,
+        )
+
+        self.times.append(current_time)
+        self.controls.append(control.copy())
+        self.reference_poses.append(preview.poses[0].copy())
+        self.reference_speeds.append(float(preview.speeds[0]))
+        self.reference_yaw_rates.append(float(preview.yaw_rates[0]))
+        self.body_twists.append(twist)
+        self.world_velocities.append(world_velocity)
+        self.slips.append(slip)
+        self.stability_margins.append(float(stability_margin))
+        self.clearances.append(
+            _minimum_clearance(self.state, self.robot, self.corridor)
+        )
+        self.robot_widths.append(
+            self.robot.envelope_width(self.state, np.array([0.0, 1.0]))
+        )
+        self.corridor_widths.append(float(self.corridor.full_width(self.state[0])))
+        self.solve_times.append(solution.solve_time)
+        self.objectives.append(solution.objective)
+        self.statuses.append(solution.status)
+        self.predictions.append(solution.predicted_states.copy())
+
+        next_state = np.asarray(
+            self.model.discrete_step(self.state, control), dtype=float
+        ).reshape(5)
+        self.states.append(next_state.copy())
+        self.state = next_state
+        self.previous_control = control.copy()
+        self.previous_world_velocity = world_velocity.copy()
+
+        reached_stop = (
+            self.simulation_parameters.stop_position is not None
+            and self.state[0] >= self.simulation_parameters.stop_position
+        )
+        exhausted_duration = len(self.times) >= self.maximum_steps
+        if reached_stop or exhausted_duration:
+            self.finished = True
+            self.completed = bool(
+                reached_stop or self.simulation_parameters.stop_position is None
+            )
+        return True
+
+    def to_log(self) -> SimulationLog:
+        """Return an immutable numeric snapshot of the history so far."""
+
+        return SimulationLog(
+            times=np.asarray(self.times, dtype=float),
+            states=np.asarray(self.states, dtype=float),
+            controls=np.asarray(self.controls, dtype=float).reshape((-1, 4)),
+            reference_poses=np.asarray(self.reference_poses, dtype=float).reshape(
+                (-1, 3)
+            ),
+            reference_speeds=np.asarray(self.reference_speeds, dtype=float),
+            reference_yaw_rates=np.asarray(self.reference_yaw_rates, dtype=float),
+            body_twists=np.asarray(self.body_twists, dtype=float).reshape((-1, 3)),
+            world_velocities=np.asarray(self.world_velocities, dtype=float).reshape(
+                (-1, 2)
+            ),
+            slips=np.asarray(self.slips, dtype=float).reshape((-1, 2, 2)),
+            stability_margins=np.asarray(self.stability_margins, dtype=float),
+            clearances=np.asarray(self.clearances, dtype=float),
+            robot_widths=np.asarray(self.robot_widths, dtype=float),
+            corridor_widths=np.asarray(self.corridor_widths, dtype=float),
+            solve_times=np.asarray(self.solve_times, dtype=float),
+            objectives=np.asarray(self.objectives, dtype=float),
+            solver_statuses=list(self.statuses),
+            predicted_states=[prediction.copy() for prediction in self.predictions],
+            completed=bool(self.completed),
+        )
+
+
 def run_closed_loop(
     controller: NMPCController,
     model: KinematicModel,
@@ -91,148 +269,34 @@ def run_closed_loop(
     simulation_parameters: SimulationParameters,
     verbose: bool = True,
 ) -> SimulationLog:
-    """Run the receding-horizon loop against the same kinematic plant."""
+    """Run the same stepwise session to completion for headless workflows."""
 
-    dt = mpc_parameters.dt
-    maximum_steps = int(np.ceil(simulation_parameters.duration / dt))
-    state = simulation_parameters.initial_state.astype(float).copy()
-    previous_control = np.zeros(4, dtype=float)
-    previous_world_velocity = np.zeros(2, dtype=float)
-
-    states = [state.copy()]
-    times: list[float] = []
-    controls: list[np.ndarray] = []
-    reference_poses: list[np.ndarray] = []
-    reference_speeds: list[float] = []
-    reference_yaw_rates: list[float] = []
-    body_twists: list[np.ndarray] = []
-    world_velocities: list[np.ndarray] = []
-    slips: list[np.ndarray] = []
-    stability_margins: list[float] = []
-    clearances: list[float] = []
-    robot_widths: list[float] = []
-    corridor_widths: list[float] = []
-    solve_times: list[float] = []
-    objectives: list[float] = []
-    statuses: list[str] = []
-    predictions: list[np.ndarray] = []
-    completed = True
-
-    for step in range(maximum_steps):
-        current_time = step * dt
-        preview = trajectory.preview(
-            current_time,
-            dt,
-            mpc_parameters.horizon_steps,
-        )
-        solution = controller.solve(
-            state,
-            preview,
-            previous_control,
-            previous_world_velocity,
-        )
-        if not solution.success:
-            completed = False
-            statuses.append(solution.status)
-            if verbose:
-                print(f"NMPC stopped at t={current_time:.2f}s: {solution.status}")
-            break
-
-        control = solution.control
-        twist = solution.body_twist.copy()
-        world_velocity = np.asarray(
-            model.world_velocity_from_twist(state, twist), dtype=float
-        ).reshape(2)
-        slip = np.asarray(
-            model.slip_components(state[3:5], control, twist),
-            dtype=float,
-        )
-        world_acceleration = (world_velocity - previous_world_velocity) / dt
-        centre_of_mass = np.asarray(robot.centre_of_mass_world(state), dtype=float)
-        evaluation_point = centre_of_mass
-        if mpc_parameters.use_zmp:
-            evaluation_point = (
-                centre_of_mass
-                - robot.parameters.com_height
-                / mpc_parameters.gravity
-                * world_acceleration
-            )
-        path_normal = np.array(
-            [-np.sin(preview.poses[0, 2]), np.cos(preview.poses[0, 2])],
-            dtype=float,
-        )
-        _, _, stability_margin = robot.lateral_stability_margins(
-            state,
-            path_normal,
-            evaluation_point,
-            mpc_parameters.smooth_epsilon,
-        )
-
-        times.append(current_time)
-        controls.append(control.copy())
-        reference_poses.append(preview.poses[0].copy())
-        reference_speeds.append(float(preview.speeds[0]))
-        reference_yaw_rates.append(float(preview.yaw_rates[0]))
-        body_twists.append(twist)
-        world_velocities.append(world_velocity)
-        slips.append(slip)
-        stability_margins.append(float(stability_margin))
-        clearances.append(_minimum_clearance(state, robot, corridor))
-        robot_widths.append(robot.envelope_width(state, np.array([0.0, 1.0])))
-        corridor_widths.append(float(corridor.full_width(state[0])))
-        solve_times.append(solution.solve_time)
-        objectives.append(solution.objective)
-        statuses.append(solution.status)
-        predictions.append(solution.predicted_states.copy())
-
-        next_state = np.asarray(
-            model.discrete_step(state, control), dtype=float
-        ).reshape(5)
-        states.append(next_state.copy())
-        state = next_state
-        previous_control = control.copy()
-        previous_world_velocity = world_velocity.copy()
-
-        if verbose and (step == 0 or (step + 1) % 10 == 0):
-            print(
-                f"t={current_time:5.2f}s  x={state[0]:5.2f}m  "
-                f"q={np.rad2deg(state[3]):6.1f}deg  "
-                f"solve={solution.solve_time:5.3f}s"
-            )
-        if (
-            simulation_parameters.stop_position is not None
-            and state[0] >= simulation_parameters.stop_position
-        ):
-            break
-
-    if not times:
-        raise RuntimeError("The controller did not complete a single simulation step")
-
-    final_time = times[-1] + dt
-    return SimulationLog(
-        times=np.asarray(times),
-        states=np.asarray(states),
-        controls=np.asarray(controls),
-        reference_poses=np.asarray(reference_poses),
-        reference_speeds=np.asarray(reference_speeds),
-        reference_yaw_rates=np.asarray(reference_yaw_rates),
-        body_twists=np.asarray(body_twists),
-        world_velocities=np.asarray(world_velocities),
-        slips=np.asarray(slips),
-        stability_margins=np.asarray(stability_margins),
-        clearances=np.asarray(clearances),
-        robot_widths=np.asarray(robot_widths),
-        corridor_widths=np.asarray(corridor_widths),
-        solve_times=np.asarray(solve_times),
-        objectives=np.asarray(objectives),
-        solver_statuses=statuses,
-        predicted_states=predictions,
-        completed=bool(
-            completed
-            and final_time <= simulation_parameters.duration + dt
-            and (
-                simulation_parameters.stop_position is None
-                or state[0] >= simulation_parameters.stop_position
-            )
-        ),
+    session = ClosedLoopSession(
+        controller=controller,
+        model=model,
+        robot=robot,
+        corridor=corridor,
+        trajectory=trajectory,
+        mpc_parameters=mpc_parameters,
+        simulation_parameters=simulation_parameters,
     )
+    while not session.finished:
+        succeeded = session.step()
+        step_count = len(session.times)
+        if verbose and succeeded and (step_count == 1 or step_count % 10 == 0):
+            print(
+                f"t={session.current_time:5.2f}s  x={session.state[0]:5.2f}m  "
+                f"q={np.rad2deg(session.state[3]):6.1f}deg  "
+                f"solve={session.solve_times[-1]:5.3f}s"
+            )
+        if not succeeded:
+            if verbose:
+                print(
+                    f"NMPC stopped at t={session.current_time:.2f}s: "
+                    f"{session.failure_status}"
+                )
+            break
+
+    if not session.times:
+        raise RuntimeError("The controller did not complete a single simulation step")
+    return session.to_log()

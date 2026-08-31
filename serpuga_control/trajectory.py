@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 
@@ -32,7 +32,7 @@ class ReferenceTrajectory:
         speed_function: Callable[[float], float],
         yaw_rate_function: Callable[[float], float],
         initial_pose: np.ndarray | None = None,
-    ) -> "ReferenceTrajectory":
+    ) -> ReferenceTrajectory:
         initial = (
             np.zeros(3, dtype=float)
             if initial_pose is None
@@ -57,12 +57,31 @@ class ReferenceTrajectory:
         duration: float,
         integration_dt: float,
         speed: float,
-    ) -> "ReferenceTrajectory":
+    ) -> ReferenceTrajectory:
         return cls.from_twist_profile(
             duration=duration,
             integration_dt=integration_dt,
             speed_function=lambda _time: speed,
             yaw_rate_function=lambda _time: 0.0,
+        )
+
+    @classmethod
+    def constant_twist(
+        cls,
+        duration: float,
+        integration_dt: float,
+        speed: float,
+        yaw_rate: float,
+        initial_pose: np.ndarray | None = None,
+    ) -> ReferenceTrajectory:
+        """Integrate the user-selected constant planar speed reference."""
+
+        return cls.from_twist_profile(
+            duration=duration,
+            integration_dt=integration_dt,
+            speed_function=lambda _time: speed,
+            yaw_rate_function=lambda _time: yaw_rate,
+            initial_pose=initial_pose,
         )
 
     @classmethod
@@ -72,7 +91,7 @@ class ReferenceTrajectory:
         integration_dt: float,
         speed: float,
         peak_yaw_rate: float = 0.22,
-    ) -> "ReferenceTrajectory":
+    ) -> ReferenceTrajectory:
         def yaw_rate(time: float) -> float:
             if time < 0.2 * duration or time > 0.8 * duration:
                 return 0.0
@@ -94,7 +113,9 @@ class ReferenceTrajectory:
         poses[:, 2] = np.interp(query_times, self.times, unwrapped_yaw)
         return poses
 
-    def preview(self, current_time: float, dt: float, horizon_steps: int) -> ReferencePreview:
+    def preview(
+        self, current_time: float, dt: float, horizon_steps: int
+    ) -> ReferencePreview:
         state_times = current_time + dt * np.arange(horizon_steps + 1)
         control_times = state_times[:-1]
         state_times = np.clip(state_times, self.times[0], self.times[-1])
@@ -108,4 +129,3 @@ class ReferenceTrajectory:
 
 def wrapped_angle_error(angle: np.ndarray | float) -> np.ndarray | float:
     return np.arctan2(np.sin(angle), np.cos(angle))
-

@@ -186,18 +186,16 @@ class NMPCController:
                     - desired_heading
                     - r.nominal_configuration[track_index]
                 )
-                objective += p.track_alignment_weight * 2.0 * (
-                    1.0 - ca.cos(track_heading_error)
+                objective += (
+                    p.track_alignment_weight * 2.0 * (1.0 - ca.cos(track_heading_error))
                 )
             symmetry_reference = float(
                 np.dot(r.symmetry_coupling, r.nominal_configuration)
             )
-            symmetry_expression = ca.dot(
-                ca.DM(r.symmetry_coupling), state[3:5]
+            symmetry_expression = ca.dot(ca.DM(r.symmetry_coupling), state[3:5])
+            objective += (
+                p.symmetry_weight * (symmetry_expression - symmetry_reference) ** 2
             )
-            objective += p.symmetry_weight * (
-                symmetry_expression - symmetry_reference
-            ) ** 2
             objective += p.nominal_configuration_weight * ca.sumsqr(
                 state[3:5] - ca.DM(r.nominal_configuration)
             )
@@ -206,8 +204,7 @@ class NMPCController:
             centre_of_mass = self.robot.centre_of_mass_world(state)
             if p.use_zmp:
                 evaluation_point = (
-                    centre_of_mass
-                    - (r.com_height / p.gravity) * world_acceleration
+                    centre_of_mass - (r.com_height / p.gravity) * world_acceleration
                 )
             else:
                 evaluation_point = centre_of_mass
@@ -235,13 +232,11 @@ class NMPCController:
 
         self._add_corridor_constraints(self.states[:, n])
 
-        terminal_position_error = (
-            self.states[0:2, n] - self.reference_poses[0:2, n]
-        )
+        terminal_position_error = self.states[0:2, n] - self.reference_poses[0:2, n]
         terminal_heading_error = self.states[2, n] - self.reference_poses[2, n]
         objective += p.terminal_position_weight * ca.sumsqr(terminal_position_error)
-        objective += p.terminal_heading_weight * 2.0 * (
-            1.0 - ca.cos(terminal_heading_error)
+        objective += (
+            p.terminal_heading_weight * 2.0 * (1.0 - ca.cos(terminal_heading_error))
         )
 
         self.opti.minimize(objective)
@@ -343,8 +338,7 @@ class NMPCController:
             )
             target_twist = np.r_[
                 world_to_body @ world_velocity_target,
-                (state_guess[2, step + 1] - state_guess[2, step])
-                / self.parameters.dt,
+                (state_guess[2, step + 1] - state_guess[2, step]) / self.parameters.dt,
             ]
             track_speeds = np.linalg.lstsq(
                 twist_scaling @ speed_map,

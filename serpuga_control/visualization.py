@@ -13,7 +13,6 @@ from .corridor import StraightGapCorridor
 from .robot import RobotDescription
 from .simulation import SimulationLog
 
-
 COLOURS = {
     "ink": "#162033",
     "muted": "#667085",
@@ -219,13 +218,17 @@ def plot_simulation_dashboard(
     approach_candidates = np.flatnonzero(log.states[:-1, 0] < corridor.gap_start - 0.15)
     exit_candidates = np.flatnonzero(log.states[:-1, 0] > corridor.gap_end + 0.15)
     approach_index = int(approach_candidates[-1]) if approach_candidates.size else 0
-    exit_index = int(exit_candidates[0]) if exit_candidates.size else len(log.states) - 1
+    exit_index = (
+        int(exit_candidates[0]) if exit_candidates.size else len(log.states) - 1
+    )
     snapshot_indices = sorted(
-        set([0, approach_index, fold_index, exit_index, len(log.states) - 1])
+        {0, approach_index, fold_index, exit_index, len(log.states) - 1}
     )
     for index in snapshot_indices:
         if index == fold_index:
-            draw_robot(scene, log.states[index], robot, alpha=0.98, label="Modo estrecho")
+            draw_robot(
+                scene, log.states[index], robot, alpha=0.98, label="Modo estrecho"
+            )
         elif index == 0:
             draw_robot(scene, log.states[index], robot, alpha=0.42, label="Inicio")
         elif index == len(log.states) - 1:
@@ -245,7 +248,9 @@ def plot_simulation_dashboard(
             label="Horizonte MPC",
         )
 
-    scene.set_title("Vista superior del corredor", loc="left", color=COLOURS["ink"], pad=12)
+    scene.set_title(
+        "Vista superior del corredor", loc="left", color=COLOURS["ink"], pad=12
+    )
     scene.set_xlabel("x [m]", color=COLOURS["muted"])
     scene.set_ylabel("y [m]", color=COLOURS["muted"])
     scene.set_xlim(x_min, x_max)
@@ -277,7 +282,9 @@ def plot_simulation_dashboard(
     )
     configuration.set_ylabel("Ángulo [deg]", color=COLOURS["muted"])
     configuration.set_xlabel("Tiempo [s]", color=COLOURS["muted"])
-    configuration.set_title("Reconfiguración y anchura", loc="left", color=COLOURS["ink"])
+    configuration.set_title(
+        "Reconfiguración y anchura", loc="left", color=COLOURS["ink"]
+    )
     _style_axis(configuration)
     width_axis = configuration.twinx()
     width_axis.plot(

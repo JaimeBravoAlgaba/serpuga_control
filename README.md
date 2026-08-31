@@ -5,8 +5,6 @@ dos orugas reconfigurables. El controlador sigue una trayectoria con referencias
 de velocidad lineal y angular, minimiza el deslizamiento, adapta la envolvente
 del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 
-![Visualizador del escenario de demostración](docs/serpuga_visualizer.png)
-
 ## Qué incluye
 
 - descripción paramétrica de pivotes, huellas, masas y límites de actuación;
@@ -19,22 +17,27 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 - restricciones sobre todos los vértices del robot;
 - corredor sintético intercambiable por el futuro estimador láser;
 - estabilidad lateral geométrica o mediante ZMP aproximado;
-- simulación en horizonte recedente y reproductor gráfico en tiempo real;
-- pausa/reanudación, paso atrás y paso adelante sobre todo el historial.
+- aplicación gráfica con configuración completa y perfiles YAML;
+- simulación online: cada paso MPC se resuelve, aplica y dibuja inmediatamente;
+- ejecución, pausa, reanudación y parada sin precalcular la trayectoria ejecutada.
 
 ## Estructura
 
 | Módulo | Función |
 |---|---|
-| `config.py` | Dimensiones, límites y pesos |
+| `config.py` | Dataclasses numéricas consumidas por el controlador |
+| `configuration.py` | Esquema de interfaz, validación y perfiles YAML |
 | `robot.py` | Geometría, huellas, CoM y soporte |
 | `kinematics.py` | Twist, slip e integración RK4 |
 | `trajectory.py` | Referencias y previsualización |
 | `corridor.py` | Estimación sintética del espacio libre |
 | `nmpc.py` | Formulación y resolución del NMPC |
-| `simulation.py` | Bucle cerrado y métricas |
+| `runtime.py` | Construcción del modelo y controlador desde un perfil |
+| `simulation.py` | Sesión online paso a paso, bucle batch y métricas |
+| `app.py` | Aplicación de escritorio y editor de parámetros |
+| `online_visualization.py` | Visualización actualizada durante la optimización |
 | `playback.py` | Estado de reproducción y navegación temporal |
-| `live_visualization.py` | Ventana interactiva en tiempo real |
+| `live_visualization.py` | Reproductor histórico para exportar vídeos |
 | `visualization.py` | Generador opcional de informes estáticos |
 | `cli.py` | Ejecución reproducible de escenarios |
 
@@ -60,68 +63,62 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-## Ejecución
+## Aplicación interactiva
 
-Escenario con estrechamiento:
-
-```bash
-python -m serpuga_control --scenario gap
-```
-
-Tras calcular el historial del MPC se abre automáticamente la ventana y la
-simulación comienza a velocidad 1×. Los controles disponibles son:
-
-- **Pausa / Reanudar** (también con la barra espaciadora);
-- **Paso atrás** (también con `←`);
-- **Paso adelante** (también con `→`);
-- **Repetir** al llegar al último instante.
-
-Seguimiento con velocidad angular no nula y corredor abierto:
+Desde la raíz del repositorio:
 
 ```bash
-python -m serpuga_control --scenario turn
+python -m serpuga_control
 ```
 
-Partida con la barra transversal y las orugas antiparalelas —una extendida
-hacia delante y la otra hacia atrás—:
+La ventana se abre con el robot y el corredor ya inicializados. A la derecha
+aparecen cuatro pestañas:
+
+- **Robot**: geometría, masas, articulaciones, actuadores y pesos de contacto;
+- **Escenario**: anchuras, posición y transición del hueco;
+- **Simulación**: estado inicial, duración y referencias constantes `v` y `ω`;
+- **MPC**: horizonte, costes, restricciones, ZMP y opciones de IPOPT.
+
+Al pulsar **Ejecutar**, la aplicación construye el controlador con los valores
+visibles. Después resuelve una única iteración, aplica ese control al modelo y
+actualiza la figura antes de pasar a la siguiente. No existe un cálculo previo
+de toda la ejecución. Si una iteración tarda más que el periodo configurado, la
+barra inferior muestra el ritmo real alcanzado en lugar de ocultar el retraso.
+
+## Configuraciones YAML
+
+Los perfiles se guardan en [`configs/`](configs/). El desplegable superior lista
+automáticamente todos los archivos `.yaml` y `.yml` de esa carpeta. **Cargar**
+rellena todas las pestañas y **Guardar como…** crea o actualiza un perfil con los
+valores actuales.
+
+Se incluyen tres ejemplos editables:
+
+- `default.yaml`: orugas antiparalelas y hueco de 0,58 m;
+- `parallel-gap.yaml`: partida con las orugas paralelas;
+- `open-turn.yaml`: corredor abierto y referencia angular no nula.
+
+También puede elegirse el perfil inicial al abrir la interfaz:
 
 ```bash
-python -m serpuga_control --scenario opposed
+python -m serpuga_control --config parallel-gap
 ```
 
-La anchura total del hueco puede sobrescribirse en metros desde la terminal:
+Para listar perfiles o ejecutar uno sin interfaz:
 
 ```bash
-python -m serpuga_control --scenario opposed --gap-width 0.40
+python -m serpuga_control --list-configs
+python -m serpuga_control --config default --headless
 ```
 
-El margen de seguridad configurado se aplica adicionalmente hacia el interior
-desde cada pared.
-
-Para ejecutar únicamente el cálculo, por ejemplo en CI o en una terminal sin
-escritorio:
+La exportación de capturas y vídeos se mantiene como operación batch:
 
 ```bash
-python -m serpuga_control --scenario gap --headless
+python -m serpuga_control --config default --screenshot artifacts/gap.png
+python -m serpuga_control --config default --video artifacts/run.mp4
 ```
 
-Se puede guardar además una captura del reproductor sin cambiar el modo live:
-
-```bash
-python -m serpuga_control --scenario gap --screenshot artifacts/gap.png
-```
-
-Para exportar una reproducción completa a velocidad 1×:
-
-```bash
-python -m serpuga_control --scenario opposed --video artifacts/opposed.mp4
-```
-
-También se instala el comando equivalente:
-
-```bash
-serpuga-demo --scenario gap
-```
+También se instala el comando equivalente `serpuga-demo`.
 
 ## Pruebas
 

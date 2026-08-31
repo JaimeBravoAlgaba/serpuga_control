@@ -9,7 +9,7 @@ import casadi as ca
 import numpy as np
 
 from .config import MPCParameters
-from .math_utils import J2_CASADI, J2_NUMPY, as_column, is_symbolic, rotation_2d
+from .math_utils import J2_CASADI, J2_NUMPY, is_symbolic, rotation_2d
 from .robot import RobotDescription
 
 
@@ -47,20 +47,16 @@ class KinematicModel:
                 longitudinal = rotation @ ca.DM([1.0, 0.0])
                 lateral = rotation @ ca.DM([0.0, 1.0])
                 a_i = ca.horzcat(identity, j_matrix @ centre)
-                weight_i = (
-                    params.longitudinal_slip_weight
-                    * (longitudinal @ longitudinal.T)
-                    + params.lateral_slip_weight * (lateral @ lateral.T)
-                )
+                weight_i = params.longitudinal_slip_weight * (
+                    longitudinal @ longitudinal.T
+                ) + params.lateral_slip_weight * (lateral @ lateral.T)
             else:
                 longitudinal = rotation @ np.array([1.0, 0.0])
                 lateral = rotation @ np.array([0.0, 1.0])
                 a_i = np.column_stack((identity, j_matrix @ centre))
-                weight_i = (
-                    params.longitudinal_slip_weight
-                    * np.outer(longitudinal, longitudinal)
-                    + params.lateral_slip_weight * np.outer(lateral, lateral)
-                )
+                weight_i = params.longitudinal_slip_weight * np.outer(
+                    longitudinal, longitudinal
+                ) + params.lateral_slip_weight * np.outer(lateral, lateral)
             row = slice(2 * index, 2 * index + 2)
             c_matrix[row, index] = derivative
             e_matrix[row, index] = longitudinal
@@ -89,16 +85,22 @@ class KinematicModel:
         regularisation = self.mpc_parameters.regularisation
         if is_symbolic(q[0]):
             normal = a_matrix.T @ weight @ a_matrix + regularisation * ca.DM.eye(3)
-            rhs = a_matrix.T @ weight @ (
-                e_matrix @ track_speeds - c_matrix @ articulation_rates
+            rhs = (
+                a_matrix.T
+                @ weight
+                @ (e_matrix @ track_speeds - c_matrix @ articulation_rates)
             )
             # symbolicqr keeps this small 3x3 solve differentiable and allows
             # CasADi to expand the complete NMPC graph efficiently.
             return ca.solve(normal, rhs, "symbolicqr")
         normal = a_matrix.T @ weight @ a_matrix + regularisation * np.eye(3)
-        rhs = a_matrix.T @ weight @ (
-            e_matrix @ np.asarray(track_speeds)
-            - c_matrix @ np.asarray(articulation_rates)
+        rhs = (
+            a_matrix.T
+            @ weight
+            @ (
+                e_matrix @ np.asarray(track_speeds)
+                - c_matrix @ np.asarray(articulation_rates)
+            )
         )
         return np.linalg.solve(normal, rhs)
 
@@ -108,9 +110,7 @@ class KinematicModel:
         track_speeds = control[0:2]
         articulation_rates = control[2:4]
         return (
-            a_matrix @ twist
-            + c_matrix @ articulation_rates
-            - e_matrix @ track_speeds
+            a_matrix @ twist + c_matrix @ articulation_rates - e_matrix @ track_speeds
         )
 
     def slip_components(
@@ -128,12 +128,18 @@ class KinematicModel:
                 longitudinal = rotation @ ca.DM([1.0, 0.0])
                 lateral = rotation @ ca.DM([0.0, 1.0])
                 local_slip = slip[2 * index : 2 * index + 2]
-                rows.append(ca.horzcat(ca.dot(longitudinal, local_slip), ca.dot(lateral, local_slip)))
+                rows.append(
+                    ca.horzcat(
+                        ca.dot(longitudinal, local_slip), ca.dot(lateral, local_slip)
+                    )
+                )
             else:
                 longitudinal = rotation @ np.array([1.0, 0.0])
                 lateral = rotation @ np.array([0.0, 1.0])
                 local_slip = slip[2 * index : 2 * index + 2]
-                rows.append([np.dot(longitudinal, local_slip), np.dot(lateral, local_slip)])
+                rows.append(
+                    [np.dot(longitudinal, local_slip), np.dot(lateral, local_slip)]
+                )
         if symbolic:
             return ca.vertcat(*rows)
         return np.asarray(rows, dtype=float)

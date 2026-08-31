@@ -8,8 +8,10 @@ dependencies:
   - casadi>=3.6
   - matplotlib>=3.8
   - numpy>=1.26
+  - pyyaml>=6.0
   - pillow>=10
   - ffmpeg
+  - tk
   - pytest>=8
   - pip>=23
   - setuptools>=68

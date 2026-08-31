@@ -131,7 +131,9 @@ class RobotDescription:
         else:
             weighted = params.body_mass * params.body_com.copy()
         for index in range(2):
-            weighted = weighted + params.track_mass * self.track_center_body(q[index], index)
+            weighted = weighted + params.track_mass * self.track_center_body(
+                q[index], index
+            )
         return weighted / (params.body_mass + 2.0 * params.track_mass)
 
     def centre_of_mass_world(self, state: Any) -> Any:
@@ -191,4 +193,3 @@ class RobotDescription:
             for vertex in self.footprint_vertices_world(state)
         ]
         return max(projections) - min(projections)
-

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from functools import reduce
-from typing import Any, Iterable
+from typing import Any
 
 import casadi as ca
 import numpy as np
-
 
 CASADI_TYPES = (ca.MX, ca.SX, ca.DM)
 
@@ -57,4 +57,3 @@ def as_column(vector: np.ndarray) -> ca.DM:
 
 J2_NUMPY = np.array([[0.0, -1.0], [1.0, 0.0]], dtype=float)
 J2_CASADI = ca.DM(J2_NUMPY)
-

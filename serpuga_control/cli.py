@@ -1,38 +1,42 @@
-"""Command-line entry point for the reproducible NMPC demos."""
+"""Command-line entry point for the interactive SERPUGA application."""
 
 from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import replace
 from pathlib import Path
 
-import numpy as np
-
-from .config import MPCParameters, RobotParameters, SimulationParameters
-from .corridor import StraightGapCorridor
-from .kinematics import KinematicModel
-from .nmpc import NMPCController
-from .robot import RobotDescription
-from .simulation import run_closed_loop
-from .trajectory import ReferenceTrajectory
+from .configuration import ConfigurationError, ConfigurationStore
 from .live_visualization import LiveSimulationPlayer
+from .runtime import build_runtime
+from .simulation import run_closed_loop
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the SERPUGA kinematic NMPC simulation.",
+        description="Configure and run the SERPUGA kinematic NMPC simulation.",
     )
     parser.add_argument(
-        "--scenario",
-        choices=("gap", "turn", "opposed"),
-        default="gap",
-        help="Synthetic scenario: standard gap, turn, or opposed-track start.",
+        "--config",
+        default="default",
+        metavar="NAME_OR_PATH",
+        help="Initial YAML profile name or path (default: default).",
+    )
+    parser.add_argument(
+        "--config-dir",
+        type=Path,
+        default=Path("configs"),
+        help="Directory listed by the profile selector (default: ./configs).",
+    )
+    parser.add_argument(
+        "--list-configs",
+        action="store_true",
+        help="List available YAML profile names and exit.",
     )
     parser.add_argument(
         "--headless",
         action="store_true",
-        help="Run without opening the real-time visualiser (for CI or remote shells).",
+        help="Run the selected profile to completion without opening the GUI.",
     )
     parser.add_argument(
         "--screenshot",
@@ -40,144 +44,88 @@ def build_parser() -> argparse.ArgumentParser:
         dest="screenshot",
         type=Path,
         default=None,
-        help="Optionally save a frame of the live visualiser as a PNG.",
+        help="Batch-run the profile and save one replay frame as PNG.",
     )
     parser.add_argument(
         "--video",
         type=Path,
         default=None,
-        help="Optionally export the 1x replay as an MP4 or GIF.",
+        help="Batch-run the profile and export its replay as MP4 or GIF.",
     )
     parser.add_argument(
-        "--gap-width",
-        type=float,
-        default=None,
-        metavar="METRES",
-        help=(
-            "Override the full gap width in metres for the gap and opposed "
-            "scenarios (defaults: 0.61 m and 0.58 m, respectively)."
-        ),
-    )
-    parser.add_argument("--quiet", action="store_true", help="Suppress progress messages.")
-    parser.add_argument(
-        "--no-zmp",
-        action="store_true",
-        help="Use the quasi-static CoM margin instead of the approximate ZMP.",
+        "--quiet", action="store_true", help="Suppress progress messages."
     )
     return parser
 
 
-def run_demo(arguments: argparse.Namespace):
-    if arguments.gap_width is not None and arguments.gap_width <= 0.0:
-        raise ValueError("--gap-width must be greater than zero")
-    if arguments.scenario == "turn" and arguments.gap_width is not None:
-        raise ValueError("--gap-width is only valid for gap or opposed scenarios")
-
-    robot_parameters = (
-        RobotParameters.opposed_tracks()
-        if arguments.scenario == "opposed"
-        else RobotParameters()
-    )
-    if arguments.scenario == "opposed":
-        mpc_parameters = MPCParameters(
-            use_zmp=not arguments.no_zmp,
-            horizon_steps=22,
-            maximum_heading_error=np.deg2rad(60.0),
-            heading_weight=0.5,
-            yaw_rate_weight=2.0,
-            track_alignment_weight=25.0,
-            maximum_lateral_slip=0.02,
-        )
-    else:
-        mpc_parameters = MPCParameters(use_zmp=not arguments.no_zmp)
-    simulation_parameters = SimulationParameters()
-    if arguments.scenario == "opposed":
-        initial_state = simulation_parameters.initial_state.copy()
-        initial_state[3:5] = robot_parameters.nominal_configuration
-        simulation_parameters = replace(
-            simulation_parameters,
-            initial_state=initial_state,
-        )
-    robot = RobotDescription(robot_parameters)
-    model = KinematicModel(robot, mpc_parameters)
-
-    if arguments.scenario in ("gap", "opposed"):
-        # The parallel-start robot is 0.62 m wide, so a 0.61 m opening still
-        # requires active folding after accounting for the 10 mm wall margin.
-        # The opposed scenario keeps the more demanding 0.58 m opening.
-        default_gap_width = 0.61 if arguments.scenario == "gap" else 0.58
-        corridor = StraightGapCorridor(
-            gap_width=(
-                default_gap_width
-                if arguments.gap_width is None
-                else arguments.gap_width
-            )
-        )
-        trajectory = ReferenceTrajectory.straight(
-            duration=simulation_parameters.duration + mpc_parameters.horizon_time,
-            integration_dt=mpc_parameters.dt,
-            speed=simulation_parameters.desired_speed,
-        )
-    else:
-        corridor = StraightGapCorridor(
-            open_width=4.0,
-            gap_width=4.0,
-            gap_start=100.0,
-            gap_end=101.0,
-        )
-        simulation_parameters = replace(
-            simulation_parameters,
-            duration=8.0,
-            stop_position=None,
-        )
-        trajectory = ReferenceTrajectory.gentle_turn(
-            duration=simulation_parameters.duration + mpc_parameters.horizon_time,
-            integration_dt=mpc_parameters.dt,
-            speed=0.28,
-        )
-
-    controller = NMPCController(robot, model, corridor, mpc_parameters)
+def run_profile(
+    store: ConfigurationStore,
+    profile: str,
+    *,
+    quiet: bool = False,
+    screenshot: Path | None = None,
+    video: Path | None = None,
+):
+    configuration = store.load(profile)
+    runtime = build_runtime(configuration)
     log = run_closed_loop(
-        controller=controller,
-        model=model,
-        robot=robot,
-        corridor=corridor,
-        trajectory=trajectory,
-        mpc_parameters=mpc_parameters,
-        simulation_parameters=simulation_parameters,
-        verbose=not arguments.quiet,
+        controller=runtime.controller,
+        model=runtime.model,
+        robot=runtime.robot,
+        corridor=configuration.corridor,
+        trajectory=runtime.trajectory,
+        mpc_parameters=configuration.mpc,
+        simulation_parameters=configuration.simulation,
+        verbose=not quiet,
     )
     print(json.dumps(log.summary(), indent=2, ensure_ascii=False))
 
-    player: LiveSimulationPlayer | None = None
-    if (
-        not arguments.headless
-        or arguments.screenshot is not None
-        or arguments.video is not None
-    ):
+    if screenshot is not None or video is not None:
         player = LiveSimulationPlayer(
             log=log,
-            robot=robot,
-            corridor=corridor,
-            mpc_parameters=mpc_parameters,
+            robot=runtime.robot,
+            corridor=configuration.corridor,
+            mpc_parameters=configuration.mpc,
         )
-    if arguments.screenshot is not None and player is not None:
-        screenshot = player.save_frame(arguments.screenshot)
-        print(f"Visualiser screenshot saved to {screenshot.resolve()}")
-    if arguments.video is not None and player is not None:
-        video = player.save_animation(arguments.video)
-        print(f"Visualiser animation saved to {video.resolve()}")
-    if not arguments.headless and player is not None:
-        if not arguments.quiet:
-            print("Opening real-time replay at 1x. Close the window to exit.")
-        player.show()
-    if player is not None:
+        if screenshot is not None:
+            output = player.save_frame(screenshot)
+            print(f"Visualiser screenshot saved to {output.resolve()}")
+        if video is not None:
+            output = player.save_animation(video)
+            print(f"Visualiser animation saved to {output.resolve()}")
         player.close()
     return log
 
 
 def main() -> None:
-    run_demo(build_parser().parse_args())
+    parser = build_parser()
+    arguments = parser.parse_args()
+    store = ConfigurationStore(arguments.config_dir)
+
+    if arguments.list_configs:
+        for name in store.list_profiles():
+            print(name)
+        return
+
+    try:
+        if (
+            arguments.headless
+            or arguments.screenshot is not None
+            or arguments.video is not None
+        ):
+            run_profile(
+                store,
+                arguments.config,
+                quiet=arguments.quiet,
+                screenshot=arguments.screenshot,
+                video=arguments.video,
+            )
+        else:
+            from .app import launch_application
+
+            launch_application(store=store, initial_profile=arguments.config)
+    except ConfigurationError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":

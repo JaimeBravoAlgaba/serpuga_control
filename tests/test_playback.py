@@ -27,4 +27,3 @@ def test_manual_steps_pause_and_clamp_to_history() -> None:
     assert playback.step_forward() == 1
     assert playback.seek(99) == 3
     assert playback.progress == 1.0
-

@@ -109,3 +109,18 @@ La configuración nominal y el acoplamiento de simetría son también parámetro
 del robot. Esto permite describir tanto el montaje paralelo, con
 \(q_1+q_2=0\), como el montaje antiparalelo, con \(q_2-q_1=\pi\), sin cambiar
 la formulación del controlador.
+
+## Configuración y ejecución online
+
+Los parámetros de una ejecución se agrupan en un único perfil YAML con cuatro
+secciones: `robot`, `scenario`, `simulation` y `mpc`. Las magnitudes angulares
+de geometría se expresan en grados en el archivo y se convierten internamente a
+radianes. La referencia se define mediante una velocidad lineal y una velocidad
+angular constantes, integradas desde la pose inicial para construir el horizonte
+de referencia.
+
+La aplicación gráfica utiliza una sesión de bucle cerrado persistente. Cada
+llamada resuelve solamente el horizonte correspondiente al instante actual,
+aplica el primer comando, integra un periodo y publica inmediatamente el nuevo
+estado al visualizador. El historial se conserva para las gráficas y la
+exportación, pero no se calcula antes de comenzar la animación.

@@ -52,9 +52,7 @@ class RobotParameters:
     q_min: np.ndarray = field(
         default_factory=lambda: np.deg2rad(np.array([-70.0, 0.0]))
     )
-    q_max: np.ndarray = field(
-        default_factory=lambda: np.deg2rad(np.array([0.0, 70.0]))
-    )
+    q_max: np.ndarray = field(default_factory=lambda: np.deg2rad(np.array([0.0, 70.0])))
     narrow_configuration: np.ndarray = field(
         default_factory=lambda: np.deg2rad(np.array([-60.0, 60.0]))
     )
@@ -72,7 +70,7 @@ class RobotParameters:
     lateral_slip_weight: float = 6.0
 
     @classmethod
-    def opposed_tracks(cls) -> "RobotParameters":
+    def opposed_tracks(cls) -> RobotParameters:
         """Geometry with a transverse bar and antiparallel nominal tracks.
 
         Track 1 extends along +x and track 2 along -x.  Their pivots lie on
@@ -165,8 +163,7 @@ class SimulationParameters:
 
     duration: float = 14.0
     desired_speed: float = 0.28
-    initial_state: np.ndarray = field(
-        default_factory=lambda: np.zeros(5, dtype=float)
-    )
+    desired_yaw_rate: float = 0.0
+    initial_state: np.ndarray = field(default_factory=lambda: np.zeros(5, dtype=float))
     stop_position: float | None = 3.05
     random_seed: int = 4

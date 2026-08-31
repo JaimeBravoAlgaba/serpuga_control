@@ -38,9 +38,9 @@ class StraightGapCorridor:
         return entering - leaving
 
     def full_width(self, x_position: Any) -> Any:
-        return self.open_width - (self.open_width - self.gap_width) * self.narrowing_factor(
-            x_position
-        )
+        return self.open_width - (
+            self.open_width - self.gap_width
+        ) * self.narrowing_factor(x_position)
 
     def half_width(self, x_position: Any) -> Any:
         return 0.5 * self.full_width(x_position)

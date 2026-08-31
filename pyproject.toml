@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "serpuga-control"
-version = "0.4.0"
+version = "0.5.0"
 description = "Kinematic NMPC prototype for a two-track reconfigurable robot"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,7 @@ dependencies = [
     "casadi>=3.6",
     "matplotlib>=3.8",
     "numpy>=1.26",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
