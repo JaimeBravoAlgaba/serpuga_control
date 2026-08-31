@@ -20,10 +20,10 @@ El *twist* plano del cuerpo
 \xi=[v_x,\,v_y,\,\omega]^T
 \]
 
-es una variable algebraica del NMPC. Esto convierte el problema en una
-cinemática inversa predictiva: el controlador selecciona simultáneamente el
-movimiento rígido y los comandos de las orugas, penalizando la incompatibilidad
-entre ambos mediante el deslizamiento.
+no es una entrada independiente ni una variable libre del NMPC. Se obtiene de
+los comandos de las orugas mediante la proyección cinemática de mínimo
+deslizamiento descrita a continuación. Por tanto, el optimizador no puede
+ordenar directamente una velocidad lateral del robot.
 
 ## Deslizamiento
 
@@ -45,14 +45,28 @@ y el residuo de deslizamiento
 s_i=u_{c,i}-v_i e_i.
 \]
 
-El coste separa las componentes longitudinal y lateral, dando mayor peso a la
-segunda. Se añade además un término de *scrubbing* proporcional a
-`(omega + q_dot_i)^2` para representar el giro de una huella finita.
+La velocidad impuesta por cada banda es siempre longitudinal:
 
-`KinematicModel.body_twist()` conserva también una proyección directa de mínimo
-deslizamiento. Es útil como modelo auxiliar y para comprobar comandos, pero el
-NMPC usa la formulación inversa anterior para no confundir «mínimo slip» con
-«robot detenido».
+\[
+v_i e_i(q_i).
+\]
+
+El twist utilizado en la dinámica se calcula como
+
+\[
+\xi(q,u)=\arg\min_\xi
+\sum_{i=1}^{2}
+\left(w_\parallel s_{i,\parallel}^2+
+w_\perp s_{i,\perp}^2\right)+\varepsilon\lVert\xi\rVert^2.
+\]
+
+Así, el deslizamiento lateral puede aparecer pasivamente por incompatibilidad
+geométrica o durante la reconfiguración, pero no actúa como un grado de libertad
+controlable. El NMPC lo penaliza y puede imponer además una cota máxima. En el
+escenario antiparalelo dicha cota es 0,02 m/s.
+
+Se añade también un término de *scrubbing* proporcional a
+`(omega + q_dot_i)^2` para representar el giro de una huella finita.
 
 ## Corredor
 

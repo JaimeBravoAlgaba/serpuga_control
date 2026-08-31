@@ -52,6 +52,9 @@ class SimulationLog:
                 if self.times.size > 1
                 else 0.0
             ),
+            "maximum_lateral_slip_mps": float(
+                np.max(np.abs(self.slips[:, :, 1]))
+            ),
             "minimum_clearance_m": float(np.min(self.clearances)),
             "minimum_stability_margin_m": float(np.min(self.stability_margins)),
             "maximum_fold_deg": float(
@@ -183,7 +186,7 @@ def run_closed_loop(
         predictions.append(solution.predicted_states.copy())
 
         next_state = np.asarray(
-            model.discrete_step_with_twist(state, control, twist), dtype=float
+            model.discrete_step(state, control), dtype=float
         ).reshape(5)
         states.append(next_state.copy())
         state = next_state
@@ -196,7 +199,10 @@ def run_closed_loop(
                 f"q={np.rad2deg(state[3]):6.1f}deg  "
                 f"solve={solution.solve_time:5.3f}s"
             )
-        if state[0] >= simulation_parameters.stop_position:
+        if (
+            simulation_parameters.stop_position is not None
+            and state[0] >= simulation_parameters.stop_position
+        ):
             break
 
     if not times:
@@ -221,5 +227,12 @@ def run_closed_loop(
         objectives=np.asarray(objectives),
         solver_statuses=statuses,
         predicted_states=predictions,
-        completed=completed and final_time <= simulation_parameters.duration + dt,
+        completed=bool(
+            completed
+            and final_time <= simulation_parameters.duration + dt
+            and (
+                simulation_parameters.stop_position is None
+                or state[0] >= simulation_parameters.stop_position
+            )
+        ),
     )

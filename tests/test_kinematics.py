@@ -31,13 +31,18 @@ def test_parallel_speed_difference_produces_yaw() -> None:
     assert twist[2] > 0.0
 
 
-def test_inverse_kinematic_step_integrates_supplied_twist() -> None:
+def test_discrete_step_integrates_only_the_projected_track_twist() -> None:
     model = make_model()
     state = np.zeros(5)
     control = np.array([0.25, 0.25, -0.1, 0.1])
-    twist = np.array([0.3, 0.0, 0.0])
-    next_state = model.discrete_step_with_twist(state, control, twist)
-    np.testing.assert_allclose(next_state[0], 0.3 * model.mpc_parameters.dt)
+    projected_twist = model.body_twist(state[3:5], control)
+    next_state = model.discrete_step(state, control)
+    assert next_state[0] > 0.0
+    np.testing.assert_allclose(
+        next_state[0],
+        projected_twist[0] * model.mpc_parameters.dt,
+        rtol=5.0e-3,
+    )
     np.testing.assert_allclose(next_state[3:5], control[2:4] * model.mpc_parameters.dt)
 
 
@@ -48,4 +53,3 @@ def test_folded_tracks_expose_nonzero_lateral_slip_for_straight_twist() -> None:
     control = np.array([0.18, 0.18, 0.0, 0.0])
     slip = model.slip_components(q, control, twist)
     assert np.max(np.abs(slip[:, 1])) > 0.05
-

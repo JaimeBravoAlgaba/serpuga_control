@@ -48,7 +48,6 @@ class NMPCController:
         self.parameters = parameters
         self._last_states: np.ndarray | None = None
         self._last_controls: np.ndarray | None = None
-        self._last_twists: np.ndarray | None = None
         self._last_duals: np.ndarray | None = None
         self._build_problem()
 
@@ -60,7 +59,6 @@ class NMPCController:
         self.opti = ca.Opti()
         self.states = self.opti.variable(self.state_dimension, n + 1)
         self.controls = self.opti.variable(self.control_dimension, n)
-        self.body_twists = self.opti.variable(3, n)
 
         self.initial_state = self.opti.parameter(self.state_dimension)
         self.previous_control = self.opti.parameter(self.control_dimension)
@@ -91,30 +89,32 @@ class NMPCController:
                 r.articulation_rate_limit,
             )
         )
-        self.opti.subject_to(
-            self.opti.bounded(
-                -p.body_speed_limit,
-                self.body_twists[0:2, :],
-                p.body_speed_limit,
-            )
-        )
-        self.opti.subject_to(
-            self.opti.bounded(
-                -p.body_yaw_rate_limit,
-                self.body_twists[2, :],
-                p.body_yaw_rate_limit,
-            )
-        )
-
         objective = 0
         previous_velocity_expression = self.previous_world_velocity
 
         for step in range(n):
             state = self.states[:, step]
             control = self.controls[:, step]
-            twist = self.body_twists[:, step]
-            next_state = self.model.discrete_step_with_twist(state, control, twist)
+            # The rigid-body twist is not an independent actuator.  It is the
+            # weighted minimum-slip projection of the two longitudinal track
+            # velocity vectors and the articulation rates.
+            twist = self.model.body_twist(state[3:5], control)
+            next_state = self.model.discrete_step(state, control)
             self.opti.subject_to(self.states[:, step + 1] == next_state)
+            self.opti.subject_to(
+                self.opti.bounded(
+                    -p.body_speed_limit,
+                    twist[0:2],
+                    p.body_speed_limit,
+                )
+            )
+            self.opti.subject_to(
+                self.opti.bounded(
+                    -p.body_yaw_rate_limit,
+                    twist[2],
+                    p.body_yaw_rate_limit,
+                )
+            )
 
             if step == 0:
                 control_change = control - self.previous_control
@@ -137,6 +137,13 @@ class NMPCController:
 
             world_velocity = self.model.world_velocity_from_twist(state, twist)
             slip = self.model.slip_components(state[3:5], control, twist)
+            self.opti.subject_to(
+                self.opti.bounded(
+                    -p.maximum_lateral_slip,
+                    slip[:, 1],
+                    p.maximum_lateral_slip,
+                )
+            )
 
             desired_heading = self.reference_poses[2, step]
             desired_world_velocity = self.reference_speeds[0, step] * ca.vertcat(
@@ -172,6 +179,16 @@ class NMPCController:
             objective += p.track_effort_weight * ca.sumsqr(control[0:2])
             objective += p.articulation_rate_weight * ca.sumsqr(control[2:4])
             objective += p.input_rate_weight * ca.sumsqr(control_change)
+            for track_index in range(2):
+                track_heading_error = (
+                    state[2]
+                    + state[3 + track_index]
+                    - desired_heading
+                    - r.nominal_configuration[track_index]
+                )
+                objective += p.track_alignment_weight * 2.0 * (
+                    1.0 - ca.cos(track_heading_error)
+                )
             symmetry_reference = float(
                 np.dot(r.symmetry_coupling, r.nominal_configuration)
             )
@@ -269,7 +286,7 @@ class NMPCController:
         self,
         state: np.ndarray,
         preview: ReferencePreview,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         n = self.parameters.horizon_steps
         r = self.robot.parameters
         state_guess = np.zeros((self.state_dimension, n + 1), dtype=float)
@@ -285,36 +302,81 @@ class NMPCController:
             state_guess[3 + index] = r.nominal_configuration[index] + fold_fraction * (
                 r.narrow_configuration[index] - r.nominal_configuration[index]
             )
+        state_guess[2] = preview.poses[:, 2] + fold_fraction * r.narrow_body_yaw
         state_guess[3:5, 0] = state[3:5]
+        state_guess[2, 0] = state[2]
 
         control_guess = np.zeros((self.control_dimension, n), dtype=float)
-        for index in range(2):
-            control_guess[index] = np.clip(
-                preview.speeds * np.cos(state_guess[3 + index, :-1]),
-                -r.track_speed_limit,
-                r.track_speed_limit,
-            )
         control_guess[2:4] = np.clip(
             np.diff(state_guess[3:5], axis=1) / self.parameters.dt,
             -r.articulation_rate_limit,
             r.articulation_rate_limit,
         )
-        twist_guess = np.zeros((3, n), dtype=float)
-        twist_guess[0] = preview.speeds
-        twist_guess[2] = preview.yaw_rates
-        return state_guess, control_guess, twist_guess
+        twist_scaling = np.diag([1.0, 1.0, 0.24])
+        for step in range(n):
+            q_step = state_guess[3:5, step]
+            articulation_rates = control_guess[2:4, step]
+            base_control = np.r_[np.zeros(2), articulation_rates]
+            base_twist = np.asarray(
+                self.model.body_twist(q_step, base_control), dtype=float
+            ).reshape(3)
+            speed_columns = []
+            for track_index in range(2):
+                unit_control = base_control.copy()
+                unit_control[track_index] = 1.0
+                speed_columns.append(
+                    np.asarray(
+                        self.model.body_twist(q_step, unit_control), dtype=float
+                    ).reshape(3)
+                    - base_twist
+                )
+            speed_map = np.column_stack(speed_columns)
+            world_velocity_target = (
+                state_guess[0:2, step + 1] - state_guess[0:2, step]
+            ) / self.parameters.dt
+            yaw = state_guess[2, step]
+            world_to_body = np.array(
+                [
+                    [np.cos(yaw), np.sin(yaw)],
+                    [-np.sin(yaw), np.cos(yaw)],
+                ]
+            )
+            target_twist = np.r_[
+                world_to_body @ world_velocity_target,
+                (state_guess[2, step + 1] - state_guess[2, step])
+                / self.parameters.dt,
+            ]
+            track_speeds = np.linalg.lstsq(
+                twist_scaling @ speed_map,
+                twist_scaling @ (target_twist - base_twist),
+                rcond=None,
+            )[0]
+            control_guess[0:2, step] = np.clip(
+                track_speeds,
+                -r.track_speed_limit,
+                r.track_speed_limit,
+            )
+        return state_guess, control_guess
 
     def _apply_warm_start(
         self,
         state: np.ndarray,
         preview: ReferencePreview,
     ) -> None:
+        preview_narrowing = np.asarray(
+            [self.corridor.narrowing_factor(x) for x in preview.poses[:, 0]],
+            dtype=float,
+        )
+        use_geometric_seed = (
+            abs(self.robot.parameters.narrow_body_yaw) > 1.0e-9
+            and float(np.max(preview_narrowing)) > 0.02
+        )
         if (
             self._last_states is None
             or self._last_controls is None
-            or self._last_twists is None
+            or use_geometric_seed
         ):
-            state_guess, control_guess, twist_guess = self._initial_guess(state, preview)
+            state_guess, control_guess = self._initial_guess(state, preview)
         else:
             state_guess = np.column_stack(
                 (self._last_states[:, 1:], self._last_states[:, -1])
@@ -322,18 +384,28 @@ class NMPCController:
             control_guess = np.column_stack(
                 (self._last_controls[:, 1:], self._last_controls[:, -1])
             )
-            twist_guess = np.column_stack(
-                (self._last_twists[:, 1:], self._last_twists[:, -1])
-            )
             state_guess[:, 0] = state
         self.opti.set_initial(self.states, state_guess)
         self.opti.set_initial(self.controls, control_guess)
-        self.opti.set_initial(self.body_twists, twist_guess)
         self._current_state_guess = state_guess
         self._current_control_guess = control_guess
-        self._current_twist_guess = twist_guess
         # Primal shifting is substantially more robust here than reusing duals:
         # the active wall changes as individual vertices enter/leave the gap.
+
+    def _evaluate_twists(
+        self,
+        states: np.ndarray,
+        controls: np.ndarray,
+    ) -> np.ndarray:
+        return np.column_stack(
+            [
+                np.asarray(
+                    self.model.body_twist(states[3:5, step], controls[:, step]),
+                    dtype=float,
+                ).reshape(3)
+                for step in range(controls.shape[1])
+            ]
+        )
 
     def solve(
         self,
@@ -350,10 +422,9 @@ class NMPCController:
             elapsed = perf_counter() - start
             states = np.asarray(solution.value(self.states), dtype=float)
             controls = np.asarray(solution.value(self.controls), dtype=float)
-            twists = np.asarray(solution.value(self.body_twists), dtype=float)
+            twists = self._evaluate_twists(states, controls)
             self._last_states = states
             self._last_controls = controls
-            self._last_twists = twists
             self._last_duals = np.asarray(solution.value(self.opti.lam_g), dtype=float)
             stats = self.opti.stats()
             return NMPCSolution(
@@ -371,10 +442,9 @@ class NMPCController:
             elapsed = perf_counter() - start
             state_guess = self._current_state_guess
             control_guess = self._current_control_guess
-            twist_guess = self._current_twist_guess
+            twist_guess = self._evaluate_twists(state_guess, control_guess)
             self._last_states = None
             self._last_controls = None
-            self._last_twists = None
             self._last_duals = None
             stats = self.opti.stats()
             return_status = str(stats.get("return_status", "Solve_Failed"))

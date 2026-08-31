@@ -7,6 +7,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
+
 from .config import MPCParameters, RobotParameters, SimulationParameters
 from .corridor import StraightGapCorridor
 from .kinematics import KinematicModel
@@ -61,7 +63,18 @@ def run_demo(arguments: argparse.Namespace):
         if arguments.scenario == "opposed"
         else RobotParameters()
     )
-    mpc_parameters = MPCParameters(use_zmp=not arguments.no_zmp)
+    if arguments.scenario == "opposed":
+        mpc_parameters = MPCParameters(
+            use_zmp=not arguments.no_zmp,
+            horizon_steps=22,
+            maximum_heading_error=np.deg2rad(60.0),
+            heading_weight=0.5,
+            yaw_rate_weight=2.0,
+            track_alignment_weight=25.0,
+            maximum_lateral_slip=0.02,
+        )
+    else:
+        mpc_parameters = MPCParameters(use_zmp=not arguments.no_zmp)
     simulation_parameters = SimulationParameters()
     if arguments.scenario == "opposed":
         initial_state = simulation_parameters.initial_state.copy()
@@ -74,7 +87,14 @@ def run_demo(arguments: argparse.Namespace):
     model = KinematicModel(robot, mpc_parameters)
 
     if arguments.scenario in ("gap", "opposed"):
-        corridor = StraightGapCorridor()
+        # The parallel-start robot is 0.62 m wide, so a 0.61 m opening still
+        # requires active folding after accounting for the 10 mm wall margin.
+        # The opposed scenario keeps the more demanding 0.58 m opening.
+        corridor = (
+            StraightGapCorridor(gap_width=0.61)
+            if arguments.scenario == "gap"
+            else StraightGapCorridor()
+        )
         trajectory = ReferenceTrajectory.straight(
             duration=simulation_parameters.duration + mpc_parameters.horizon_time,
             integration_dt=mpc_parameters.dt,
@@ -90,7 +110,7 @@ def run_demo(arguments: argparse.Namespace):
         simulation_parameters = replace(
             simulation_parameters,
             duration=8.0,
-            stop_position=10.0,
+            stop_position=None,
         )
         trajectory = ReferenceTrajectory.gentle_turn(
             duration=simulation_parameters.duration + mpc_parameters.horizon_time,

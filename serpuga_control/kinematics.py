@@ -171,53 +171,6 @@ class KinematicModel:
         k4 = self.state_derivative(state + dt * k3, control)
         return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
-    def state_derivative_from_twist(
-        self,
-        state: Any,
-        control: Any,
-        body_twist: Any,
-    ) -> Any:
-        """State derivative when the body twist is an optimisation variable."""
-
-        world_velocity = rotation_2d(state[2]) @ body_twist[0:2]
-        if is_symbolic(state[0]):
-            return ca.vertcat(
-                world_velocity[0],
-                world_velocity[1],
-                body_twist[2],
-                control[2],
-                control[3],
-            )
-        return np.array(
-            [
-                world_velocity[0],
-                world_velocity[1],
-                body_twist[2],
-                control[2],
-                control[3],
-            ],
-            dtype=float,
-        )
-
-    def discrete_step_with_twist(
-        self,
-        state: Any,
-        control: Any,
-        body_twist: Any,
-    ) -> Any:
-        """RK4 step used by the inverse-kinematic NMPC formulation."""
-
-        dt = self.mpc_parameters.dt
-
-        def derivative(current_state: Any) -> Any:
-            return self.state_derivative_from_twist(current_state, control, body_twist)
-
-        k1 = derivative(state)
-        k2 = derivative(state + 0.5 * dt * k1)
-        k3 = derivative(state + 0.5 * dt * k2)
-        k4 = derivative(state + dt * k3)
-        return state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-
     def world_velocity(self, state: Any, control: Any) -> Any:
         twist = self.body_twist(state[3:5], control)
         return rotation_2d(state[2]) @ twist[0:2]

@@ -8,10 +8,10 @@ import numpy as np
 
 
 def _default_pivots() -> np.ndarray:
-    # With the centre offsets below, q=(0, 0) places both tracks parallel,
-    # side by side and slightly staggered along x.  Opposite articulation
-    # angles then pull both contact patches towards the corridor centreline.
-    return np.array([[-0.39, 0.24], [-0.03, -0.24]], dtype=float)
+    # q=(0, 0) places both tracks parallel and side by side.  Keeping the
+    # pivots symmetric is important: the forward projection of equal belt
+    # speeds must not create an artificial lateral or yaw velocity.
+    return np.array([[0.0, 0.24], [0.0, -0.24]], dtype=float)
 
 
 def _default_offsets() -> np.ndarray:
@@ -62,6 +62,7 @@ class RobotParameters:
         default_factory=_default_nominal_configuration
     )
     symmetry_coupling: np.ndarray = field(default_factory=_default_symmetry_coupling)
+    narrow_body_yaw: float = 0.0
     track_speed_limit: float = 1.10
     articulation_rate_limit: float = np.deg2rad(75.0)
     track_acceleration_limit: float = 2.5
@@ -83,8 +84,9 @@ class RobotParameters:
             q_min=np.deg2rad(np.array([-70.0, 110.0])),
             q_max=np.deg2rad(np.array([0.0, 180.0])),
             nominal_configuration=np.deg2rad(np.array([0.0, 180.0])),
-            narrow_configuration=np.deg2rad(np.array([-60.0, 120.0])),
+            narrow_configuration=np.deg2rad(np.array([-35.0, 145.0])),
             symmetry_coupling=np.array([-1.0, 1.0], dtype=float),
+            narrow_body_yaw=np.deg2rad(35.0),
         )
 
     def __post_init__(self) -> None:
@@ -102,6 +104,8 @@ class RobotParameters:
             raise ValueError("symmetry_coupling must have shape (2,)")
         if np.linalg.norm(self.symmetry_coupling) <= 0.0:
             raise ValueError("symmetry_coupling must be non-zero")
+        if not np.isfinite(self.narrow_body_yaw):
+            raise ValueError("narrow_body_yaw must be finite")
         if np.any(self.q_min >= self.q_max):
             raise ValueError("Every q_min must be lower than q_max")
         for name, configuration in (
@@ -129,6 +133,7 @@ class MPCParameters:
     track_effort_weight: float = 0.015
     input_rate_weight: float = 0.12
     symmetry_weight: float = 10.0
+    track_alignment_weight: float = 0.5
     stability_weight: float = 0.35
     nominal_configuration_weight: float = 0.018
     terminal_position_weight: float = 14.0
@@ -140,6 +145,7 @@ class MPCParameters:
     maximum_heading_error: float = np.deg2rad(2.0)
     body_speed_limit: float = 0.65
     body_yaw_rate_limit: float = 1.2
+    maximum_lateral_slip: float = 0.10
     use_zmp: bool = True
     gravity: float = 9.81
     regularisation: float = 1.0e-7
@@ -162,5 +168,5 @@ class SimulationParameters:
     initial_state: np.ndarray = field(
         default_factory=lambda: np.zeros(5, dtype=float)
     )
-    stop_position: float = 3.05
+    stop_position: float | None = 3.05
     random_seed: int = 4

@@ -61,3 +61,9 @@ def test_opposed_tracks_use_opposite_belt_speeds_for_forward_motion() -> None:
     assert solution.control[0] > 0.0
     assert solution.control[1] < 0.0
     assert solution.body_twist[0] > 0.20
+    projected_twist = model.body_twist(state[3:5], solution.control)
+    np.testing.assert_allclose(
+        solution.body_twist,
+        projected_twist,
+        atol=1.0e-9,
+    )

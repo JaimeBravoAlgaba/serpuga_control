@@ -12,7 +12,8 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 - descripción paramétrica de pivotes, huellas, masas y límites de actuación;
 - cinemática plana con contribución de `q_dot` cuando el pivote no coincide con
   el centro de la huella;
-- cinemática inversa predictiva con `v1`, `v2`, `q1_dot` y `q2_dot`;
+- cinemática predictiva con `v1`, `v2`, `q1_dot` y `q2_dot`, sin un twist
+  omnidireccional independiente;
 - deslizamiento longitudinal, lateral y término de *scrubbing*;
 - NMPC de disparo múltiple implementado con CasADi/IPOPT;
 - restricciones sobre todos los vértices del robot;
@@ -117,8 +118,9 @@ se imprimen como JSON al terminar cada ejecución.
 ## Alcance actual
 
 Este repositorio valida la arquitectura y la optimización cinemática en 2D. No
-es todavía un controlador listo para hardware: el twist optimizado se considera
-realizable y la estabilidad emplea suelo plano, altura constante y una
-aproximación del ZMP. El siguiente nivel deberá introducir dinámica de
-actuadores, estimación de estado, incertidumbre del corredor y un modelo
-identificado de interacción oruga-terreno.
+es todavía un controlador listo para hardware: el twist se obtiene mediante una
+proyección cinemática anisótropa de las velocidades longitudinales, pero no se
+modelan todavía las fuerzas de contacto. La estabilidad emplea suelo plano,
+altura constante y una aproximación del ZMP. El siguiente nivel deberá
+introducir dinámica de actuadores, estimación de estado, incertidumbre del
+corredor y un modelo identificado de interacción oruga-terreno.
