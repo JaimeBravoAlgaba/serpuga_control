@@ -42,6 +42,18 @@ La formulación matemática se resume en [`docs/model.md`](docs/model.md).
 
 ## Instalación
 
+Con Conda, desde la raíz del repositorio:
+
+```bash
+conda env create -f environment.yml
+conda activate serpuga-control
+```
+
+El entorno incluye FFmpeg para poder exportar las reproducciones en MP4 y
+deja el paquete instalado en modo editable.
+
+Como alternativa, con `venv`:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate

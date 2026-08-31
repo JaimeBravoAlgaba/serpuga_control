@@ -1,0 +1,17 @@
+name: serpuga-control
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11
+  - casadi>=3.6
+  - matplotlib>=3.8
+  - numpy>=1.26
+  - pillow>=10
+  - ffmpeg
+  - pytest>=8
+  - pip>=23
+  - setuptools>=68
+  - pip:
+      - -e .
