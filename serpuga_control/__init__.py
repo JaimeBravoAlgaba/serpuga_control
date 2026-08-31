@@ -2,13 +2,14 @@
 
 from .config import MPCParameters, RobotParameters, SimulationParameters
 from .configuration import ApplicationConfiguration, ConfigurationStore
-from .kinematics import KinematicModel
+from .kinematics import InverseKinematicsSolution, KinematicModel
 from .robot import RobotDescription
 from .simulation import TeleoperationCommand
 
 __all__ = [
     "ApplicationConfiguration",
     "ConfigurationStore",
+    "InverseKinematicsSolution",
     "KinematicModel",
     "MPCParameters",
     "RobotDescription",
@@ -17,4 +18,4 @@ __all__ = [
     "TeleoperationCommand",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

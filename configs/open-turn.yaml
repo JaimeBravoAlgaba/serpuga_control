@@ -38,7 +38,7 @@ scenario:
   transition_length_m: 0.18
   centre_y_m: 0.0
 simulation:
-  duration_s: 8.0
+  duration_s: 6.0
   desired_speed_mps: 0.28
   desired_yaw_rate_rps: 0.12
   stop_x_m: null

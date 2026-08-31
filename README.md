@@ -8,10 +8,11 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 ## Qué incluye
 
 - descripción paramétrica de pivotes, huellas, masas y límites de actuación;
-- cinemática plana con contribución de `q_dot` cuando el pivote no coincide con
-  el centro de la huella;
-- cinemática predictiva con `v1`, `v2`, `q1_dot` y `q2_dot`, sin un twist
-  omnidireccional independiente;
+- control predictivo mediante el *twist* del centro de la barra
+  `[vx, vy, omega]`;
+- cinemática inversa analítica que obtiene `[q1, q2, v1, v2]` en cada periodo;
+- modelo de huella con contribución de `q_dot` cuando el pivote no coincide con
+  su centro;
 - velocidades de banda firmadas, permitiendo avance y retroceso por oruga;
 - deslizamiento longitudinal, lateral y término de *scrubbing*;
 - NMPC de disparo múltiple implementado con CasADi/IPOPT;
@@ -20,7 +21,8 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 - estabilidad lateral geométrica o mediante ZMP aproximado;
 - aplicación gráfica con configuración completa y perfiles YAML;
 - simulación online: cada paso MPC se resuelve, aplica y dibuja inmediatamente;
-- teleoperación manual en vivo con consignas articulares y velocidades de oruga;
+- teleoperación manual en vivo mediante `vx`, `vy` y `omega`, con las consignas
+  de las orugas calculadas automáticamente;
 - carga de parámetros, pausa, reanudación y parada sin precalcular la trayectoria
   ejecutada.
 
@@ -31,7 +33,7 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 | `config.py` | Dataclasses numéricas consumidas por el controlador |
 | `configuration.py` | Esquema de interfaz, validación y perfiles YAML |
 | `robot.py` | Geometría, huellas, CoM y soporte |
-| `kinematics.py` | Twist, slip e integración RK4 |
+| `kinematics.py` | Inversa analítica, slip e integración RK4 |
 | `trajectory.py` | Referencias y previsualización |
 | `corridor.py` | Estimación sintética del espacio libre |
 | `nmpc.py` | Formulación y resolución del NMPC |
@@ -84,9 +86,9 @@ inicializados. A la derecha aparecen cuatro pestañas:
 
 La simulación corre en tiempo real desde que se carga un perfil. El panel de
 **Teleoperación** permite activar **Modo manual**, que deja de resolver el MPC y
-aplica directamente las velocidades `v1`, `v2` y las consignas articulares
-`q1`, `q2` en el siguiente periodo de control. En manual, la simulación no se
-detiene por `duration` ni por `stop_x`.
+aplica directamente `[vx, vy, omega]` al centro de la barra. La cinemática
+inversa calcula en vivo `[q1, q2, v1, v2]`, que se muestran en la telemetría.
+En manual, la simulación no se detiene por `duration` ni por `stop_x`.
 
 Al pulsar **Cargar parámetros**, la aplicación reconstruye la sesión con los
 valores visibles en las pestañas. Después resuelve una única iteración, aplica
@@ -104,8 +106,8 @@ valores actuales.
 
 Se incluyen tres ejemplos editables:
 
-- `default.yaml`: orugas antiparalelas y hueco de 0,58 m;
-- `parallel-gap.yaml`: partida con las orugas paralelas;
+- `default.yaml`: orugas antiparalelas y hueco de 0,61 m;
+- `parallel-gap.yaml`: partida paralela con giro bilateral de ambas orugas;
 - `open-turn.yaml`: corredor abierto y referencia angular no nula.
 
 También puede elegirse el perfil inicial al abrir la interfaz:
@@ -146,9 +148,10 @@ se imprimen como JSON al terminar cada ejecución.
 ## Alcance actual
 
 Este repositorio valida la arquitectura y la optimización cinemática en 2D. No
-es todavía un controlador listo para hardware: el twist se obtiene mediante una
-proyección cinemática anisótropa de las velocidades longitudinales, pero no se
-modelan todavía las fuerzas de contacto. La estabilidad emplea suelo plano,
-altura constante y una aproximación del ZMP. El siguiente nivel deberá
-introducir dinámica de actuadores, estimación de estado, incertidumbre del
-corredor y un modelo identificado de interacción oruga-terreno.
+es todavía un controlador listo para hardware: el *twist* es la orden
+cinemática de alto nivel y se supone un servo articular ideal por periodo. La
+inversa es exacta en los pivotes puntuales, mientras que el modelo de huella
+finita conserva deslizamiento transitorio y *scrubbing*. La estabilidad emplea
+suelo plano, altura constante y una aproximación del ZMP. El siguiente nivel
+deberá introducir dinámica de actuadores, estimación de estado, incertidumbre
+del corredor y un modelo identificado de interacción oruga-terreno.

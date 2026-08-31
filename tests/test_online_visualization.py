@@ -37,7 +37,8 @@ def test_online_plot_arrows_follow_signed_track_speeds() -> None:
     log = SimulationLog(
         times=np.array([0.0]),
         states=states,
-        controls=np.array([[0.2, -0.2, 0.0, 0.0]]),
+        controls=np.array([[0.0, 0.0, 0.0]]),
+        actuator_commands=np.array([[0.0, 0.0, 0.2, -0.2]]),
         reference_poses=np.zeros((1, 3)),
         reference_speeds=np.array([0.0]),
         reference_yaw_rates=np.array([0.0]),

@@ -1,142 +1,207 @@
-# Modelo del prototipo
+# Modelo cinemático y control
 
-## Variables
+## Estado y variables de control
 
-La primera versión utiliza el estado
-
-\[
-x=[X,\,Y,\,\psi,\,q_1,\,q_2]^T
-\]
-
-y los comandos
+El estado de predicción es
 
 \[
-u=[v_1,\,v_2,\,\dot q_1,\,\dot q_2]^T.
+x=[X,\,Y,\,\psi,\,q_1,\,q_2]^T,
 \]
 
-El *twist* plano del cuerpo
+donde \((X,Y)\) es el centro de la barra rígida, \(\psi\) su orientación y
+\(q_i\) la orientación relativa de cada oruga.
+
+Las únicas variables de control del MPC son el *twist* plano del centro de la
+barra, expresado en el sistema ligado a ella:
 
 \[
-\xi=[v_x,\,v_y,\,\omega]^T
+u=\xi_B=[v_x,\,v_y,\,\omega]^T.
 \]
 
-no es una entrada independiente ni una variable libre del NMPC. Se obtiene de
-los comandos de las orugas mediante la proyección cinemática de mínimo
-deslizamiento descrita a continuación. Por tanto, el optimizador no puede
-ordenar directamente una velocidad lateral del robot.
+Por tanto, `v1`, `v2`, `q1` y `q2` ya no son variables independientes del
+optimizador. Se calculan mediante la cinemática inversa analítica.
 
-## Deslizamiento
+## Cinemática inversa analítica
 
-Para la oruga `i`, el centro de la huella respecto al cuerpo es
+Sea \(p_i\) la posición del pivote de la oruga \(i\) respecto al centro de la
+barra y
 
 \[
-r_i(q_i)=p_i+R(q_i)\rho_i.
+J=\begin{bmatrix}0&-1\\1&0\end{bmatrix}.
 \]
 
-Su velocidad es
+La velocidad requerida en cada pivote es
 
 \[
-u_{c,i}=v_B+\omega J r_i+\frac{\partial r_i}{\partial q_i}\dot q_i,
+u_i=
+\begin{bmatrix}v_x\\v_y\end{bmatrix}
++\omega Jp_i.
 \]
 
-y el residuo de deslizamiento
+Como una oruga solo puede generar velocidad longitudinal, su eje debe ser
+paralelo a \(u_i\). Puesto que la velocidad de banda es firmada, las
+orientaciones \(q_i\) y \(q_i+\pi\) representan el mismo eje físico. Se elige
+la solución equivalente más próxima al ángulo actual para evitar giros
+innecesarios de 180 grados.
+
+La implementación emplea la siguiente forma analítica y regularizada. Con
 
 \[
-s_i=u_{c,i}-v_i e_i.
+a_i=e(q_i)^Tu_i,
+\qquad
+b_i=n(q_i)^Tu_i,
 \]
 
-La velocidad impuesta por cada banda es siempre longitudinal:
+se calcula
 
 \[
-v_i e_i(q_i).
+\Delta q_i=
+\frac{1}{2}
+\operatorname{atan2}
+\left(
+2a_ib_i,
+a_i^2-b_i^2+\varepsilon^2
+\right),
 \]
-
-El signo de \(v_i\) es físico: valores positivos y negativos representan el
-avance o retroceso de cada banda sobre su propio eje longitudinal.
-
-El twist utilizado en la dinámica se calcula como
 
 \[
-\xi(q,u)=\arg\min_\xi
-\sum_{i=1}^{2}
-\left(w_\parallel s_{i,\parallel}^2+
-w_\perp s_{i,\perp}^2\right)+\varepsilon\lVert\xi\rVert^2.
+q_i^*=q_i+\Delta q_i,
+\qquad
+v_i^*=e(q_i^*)^Tu_i.
 \]
 
-Así, el deslizamiento lateral puede aparecer pasivamente por incompatibilidad
-geométrica o durante la reconfiguración, pero no actúa como un grado de libertad
-controlable. El NMPC lo penaliza y puede imponer además una cota máxima. En el
-escenario antiparalelo dicha cota es 0,02 m/s.
-
-Se añade también un término de *scrubbing* proporcional a
-`(omega + q_dot_i)^2` para representar el giro de una huella finita.
-
-## Corredor
-
-Cada vértice de ambas huellas y del conector rígido debe satisfacer
+La salida de la inversa tiene el orden
 
 \[
-y_\mathrm{lower}(x)+\delta \le y_j \le
-y_\mathrm{upper}(x)-\delta.
+u_{act}=[q_1^*,\,q_2^*,\,v_1^*,\,v_2^*]^T.
 \]
 
-`StraightGapCorridor` simula la salida del futuro bloque de percepción. La
-transición entre la zona abierta y el hueco utiliza funciones hiperbólicas
-suaves para mantener derivables las restricciones.
+Si \(u_i=0\), se conserva el ángulo anterior y se asigna \(v_i^*=0\). El
+signo de \(v_i^*\) es físico: permite que una oruga montada a 180 grados se
+desplace en sentido opuesto sin reorientarse.
 
-## Estabilidad
-
-El soporte lateral se obtiene proyectando las esquinas de las dos huellas sobre
-la normal de la trayectoria. Si está activado el ZMP, el punto evaluado es
+En el contacto puntual ideal del pivote se cumple
 
 \[
-p_\mathrm{ZMP}=c_{xy}-\frac{h}{g}a_{xy}.
+v_i^*e(q_i^*)=u_i,
 \]
 
-Se exige un margen mínimo respecto a ambos extremos del intervalo de soporte y
-se penalizan márgenes inferiores al objetivo. Esta es todavía una aproximación
-de suelo plano y altura constante, no un modelo dinámico de vuelco.
+por lo que la solución tiene deslizamiento nulo en ese punto siempre que los
+límites articulares y de actuación permitan aplicarla.
 
-## Prioridades
+## Evolución del estado
 
-1. Geometría del corredor y límites articulares.
-2. Margen mínimo de estabilidad.
-3. Seguimiento de posición, orientación, velocidad y velocidad angular.
-4. Deslizamiento, *scrubbing* y suavidad de los comandos.
+La pose de la barra se integra directamente desde el control:
 
-Los parámetros geométricos incluidos son ilustrativos. Antes de pasar al robot
-real deben sustituirse las posiciones de pivotes, offsets, masas, altura del
-centro de masas y límites de los actuadores.
+\[
+\begin{bmatrix}\dot X\\\dot Y\end{bmatrix}
+=R(\psi)
+\begin{bmatrix}v_x\\v_y\end{bmatrix},
+\qquad
+\dot\psi=\omega.
+\]
 
-La configuración nominal y el acoplamiento de simetría son también parámetros
-del robot. Esto permite describir tanto el montaje paralelo, con
-\(q_1+q_2=0\), como el montaje antiparalelo, con \(q_2-q_1=\pi\), sin cambiar
-la formulación del controlador.
+La implementación usa RK4 con control constante durante cada periodo. Para las
+articulaciones se adopta inicialmente un servo ideal de posición: al final del
+periodo se alcanza \(q_i^*\). La velocidad articular media requerida queda
+explícita:
 
-## Configuración y ejecución online
+\[
+\dot q_i=\frac{q_i^*-q_i}{\Delta t}.
+\]
 
-Los parámetros de una ejecución se agrupan en un único perfil YAML con cuatro
-secciones: `robot`, `scenario`, `simulation` y `mpc`. Las magnitudes angulares
-de geometría se expresan en grados en el archivo y se convierten internamente a
-radianes. La referencia se define mediante una velocidad lineal y una velocidad
-angular constantes, integradas desde el `x,y` inicial y con orientación de
-referencia inicial alineada con el corredor.
+El MPC limita esta velocidad y su variación. Esta aproximación permite separar
+la cinemática inversa del futuro modelo dinámico de los actuadores.
 
-La aplicación gráfica utiliza una sesión de bucle cerrado persistente. Cada
-llamada resuelve solamente el horizonte correspondiente al instante actual,
-aplica el primer comando, integra un periodo y publica inmediatamente el nuevo
-estado al visualizador. El historial se conserva para las gráficas y la
-exportación, pero no se calcula antes de comenzar la animación.
+## Deslizamiento de una huella finita
 
-No se configura una postura especial de entrada al hueco. El plegado de las
-orugas es una decisión del NMPC causada por las restricciones geométricas,
-estabilidad, deslizamiento, límites articulares y costes de actuación. La
-semilla numérica del solver solo usa la anchura disponible y los límites
-articulares para encontrar un punto inicial factible cuando la configuración
-nominal no cabe.
+La inversa anterior usa los pivotes como contactos puntuales. Para conservar
+la información geométrica de una oruga real, el coste y las restricciones de
+deslizamiento se evalúan en el centro de cada huella.
 
-El yaw inicial pertenece al estado del robot. No rota la referencia de posición:
-la referencia traslacional empieza en el mismo `x,y` y avanza por el eje del
-corredor. El umbral de orientación del MPC es blando, de forma que una
-orientación inicial distinta penaliza el objetivo pero no hace infeasible el
-primer paso.
+Si
+
+\[
+r_i(q_i)=p_i+R(q_i)\rho_i,
+\]
+
+su velocidad es
+
+\[
+u_{c,i}=v_B+\omega Jr_i+
+\frac{\partial r_i}{\partial q_i}\dot q_i,
+\]
+
+y el residuo es
+
+\[
+s_i=u_{c,i}-v_i^*e(q_i).
+\]
+
+Así, el contacto puntual de la inversa puede ser exacto y, al mismo tiempo, el
+modelo puede reflejar deslizamiento transitorio durante la reorientación y
+*scrubbing* debido a la longitud finita de la huella. El MPC penaliza las
+componentes longitudinal y lateral con pesos distintos y puede imponer una
+cota máxima a la componente lateral.
+
+## Formulación del MPC
+
+En cada instante del horizonte, el optimizador decide solamente
+
+\[
+u_k=[v_{x,k},\,v_{y,k},\,\omega_k]^T.
+\]
+
+Dentro del grafo simbólico de CasADi se evalúa la cinemática inversa para
+obtener \(q_{i,k}^*\), \(v_{i,k}^*\) y \(\dot q_{i,k}\). Sobre estas magnitudes
+se aplican:
+
+- límites de velocidad y aceleración de las bandas;
+- límites de posición, velocidad y aceleración articular;
+- cota de velocidad lineal y angular de la barra;
+- restricciones de deslizamiento lateral;
+- restricciones geométricas del corredor para todos los vértices;
+- margen mínimo de estabilidad geométrica o basado en ZMP.
+
+El coste conserva el seguimiento de posición, orientación, velocidad lineal y
+angular, junto con deslizamiento, *scrubbing*, esfuerzo de bandas, velocidad
+articular, suavidad del *twist*, configuración nominal y estabilidad.
+
+Una consecuencia importante es que la forma del robot ya no puede elegirse de
+manera independiente: debe ser compatible con el movimiento instantáneo de la
+barra. Para estrecharse, el MPC busca una secuencia de \(v_x\), \(v_y\) y
+\(\omega\) cuya cinemática inversa produzca configuraciones que entren en el
+hueco y respeten simultáneamente el seguimiento y la estabilidad.
+
+## Corredor y estabilidad
+
+Cada vértice de ambas huellas y del conector debe satisfacer
+
+\[
+y_{lower}(x)+\delta \le y_j \le y_{upper}(x)-\delta.
+\]
+
+`StraightGapCorridor` simula la salida del futuro bloque de percepción. Para
+la estabilidad, el soporte lateral se obtiene proyectando las esquinas de las
+orugas sobre la normal de la trayectoria. Cuando se activa la aproximación ZMP,
+el punto evaluado es
+
+\[
+p_{ZMP}=c_{xy}-\frac{h}{g}a_{xy}.
+\]
+
+Se exige un margen mínimo respecto a ambos extremos del intervalo de soporte.
+Sigue siendo una aproximación bidimensional sobre suelo plano, no un modelo
+dinámico completo de vuelco.
+
+## Simulación y teleoperación
+
+El visualizador conserva por separado:
+
+- `controls`: \([v_x,v_y,\omega]\), las decisiones del MPC o del usuario;
+- `actuator_commands`: \([q_1,q_2,v_1,v_2]\), la salida de la cinemática
+  inversa.
+
+En modo manual, los tres deslizadores controlan directamente \(v_x\), \(v_y\)
+y \(\omega\). La misma cinemática inversa que usa el MPC genera las consignas
+de las orugas en vivo.

@@ -601,8 +601,8 @@ class LiveSimulationPlayer:
         telemetry_index = min(index, self.log.times.size - 1)
         measurement_stop = min(index + 1, self.log.times.size)
         track_speeds = (
-            self.log.controls[telemetry_index, 0:2]
-            if self.log.controls.size
+            self.log.actuator_commands[telemetry_index, 2:4]
+            if self.log.actuator_commands.size
             else np.ones(2, dtype=float)
         )
 
@@ -678,6 +678,8 @@ class LiveSimulationPlayer:
         q_degrees = np.rad2deg(state[3:5])
         slip_values = self._slip_magnitude[telemetry_index]
         self.telemetry_text.set_text(
+            f"vx, vy   {self.log.controls[telemetry_index, 0]: .3f}, "
+            f"{self.log.controls[telemetry_index, 1]: .3f} m/s\n"
             f"v1, v2  {track_speeds[0]: .3f}, {track_speeds[1]: .3f} m/s\n"
             f"v       {self._forward_speed[telemetry_index]: .3f} / "
             f"{self.log.reference_speeds[telemetry_index]:.3f} m/s\n"

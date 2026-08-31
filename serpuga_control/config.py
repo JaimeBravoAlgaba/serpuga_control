@@ -8,9 +8,9 @@ import numpy as np
 
 
 def _default_pivots() -> np.ndarray:
-    # q=(0, 0) places both tracks parallel and side by side.  Keeping the
-    # pivots symmetric is important: the forward projection of equal belt
-    # speeds must not create an artificial lateral or yaw velocity.
+    # q=(0, 0) places both tracks parallel and side by side. Coordinates are
+    # expressed from the centre of the rigid bar, which is the controlled
+    # point of the planar model.
     return np.array([[0.0, 0.24], [0.0, -0.24]], dtype=float)
 
 
@@ -84,6 +84,15 @@ class RobotParameters:
     def __post_init__(self) -> None:
         if self.pivot_positions.shape != (2, 2):
             raise ValueError("pivot_positions must have shape (2, 2)")
+        if not np.allclose(
+            np.mean(self.pivot_positions, axis=0),
+            np.zeros(2),
+            atol=1.0e-9,
+        ):
+            raise ValueError(
+                "pivot_positions must be expressed from the bar centre "
+                "(their midpoint must be [0, 0])"
+            )
         if self.track_center_offsets.shape != (2, 2):
             raise ValueError("track_center_offsets must have shape (2, 2)")
         if self.q_min.shape != (2,) or self.q_max.shape != (2,):
@@ -99,7 +108,9 @@ class RobotParameters:
         if np.any(self.nominal_configuration < self.q_min) or np.any(
             self.nominal_configuration > self.q_max
         ):
-            raise ValueError("nominal_configuration must lie inside the articulation limits")
+            raise ValueError(
+                "nominal_configuration must lie inside the articulation limits"
+            )
 
 
 @dataclass(frozen=True)

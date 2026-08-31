@@ -59,10 +59,18 @@ def _field(
 
 FORM_FIELDS: tuple[ParameterField, ...] = (
     # Robot · geometry
-    _field("Robot", "Geometría", "robot", "pivot_1_x_m", "Pivote 1 · x", "m"),
-    _field("Robot", "Geometría", "robot", "pivot_1_y_m", "Pivote 1 · y", "m"),
-    _field("Robot", "Geometría", "robot", "pivot_2_x_m", "Pivote 2 · x", "m"),
-    _field("Robot", "Geometría", "robot", "pivot_2_y_m", "Pivote 2 · y", "m"),
+    _field(
+        "Robot", "Geometría", "robot", "pivot_1_x_m", "Pivote 1 · x desde centro", "m"
+    ),
+    _field(
+        "Robot", "Geometría", "robot", "pivot_1_y_m", "Pivote 1 · y desde centro", "m"
+    ),
+    _field(
+        "Robot", "Geometría", "robot", "pivot_2_x_m", "Pivote 2 · x desde centro", "m"
+    ),
+    _field(
+        "Robot", "Geometría", "robot", "pivot_2_y_m", "Pivote 2 · y desde centro", "m"
+    ),
     _field(
         "Robot", "Geometría", "robot", "track_1_offset_x_m", "Offset oruga 1 · x", "m"
     ),
@@ -130,7 +138,7 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
     _field("Robot", "Articulaciones", "robot", "q2_nominal_deg", "q2 nominal", "deg"),
     _field("Robot", "Articulaciones", "robot", "symmetry_1", "Acoplamiento q1"),
     _field("Robot", "Articulaciones", "robot", "symmetry_2", "Acoplamiento q2"),
-    # Robot · actuators and contact projection
+    # Robot · actuators and contact slip
     _field(
         "Robot",
         "Actuadores",
@@ -165,14 +173,14 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
     ),
     _field(
         "Robot",
-        "Proyección de contacto",
+        "Deslizamiento de contacto",
         "robot",
         "longitudinal_slip_weight",
         "Peso longitudinal",
     ),
     _field(
         "Robot",
-        "Proyección de contacto",
+        "Deslizamiento de contacto",
         "robot",
         "lateral_slip_weight",
         "Peso lateral",

@@ -1,3 +1,5 @@
+import numpy as np
+
 from serpuga_control import (
     KinematicModel,
     MPCParameters,
@@ -80,8 +82,7 @@ def test_closed_loop_session_can_step_from_manual_teleoperation() -> None:
     )
     command = TeleoperationCommand(
         enabled=True,
-        track_speeds=[9.0, -9.0],
-        articulation_targets=[0.0, 0.5],
+        body_twist=[9.0, 3.0, 0.3],
     )
 
     assert session.step(command)
@@ -90,9 +91,13 @@ def test_closed_loop_session_can_step_from_manual_teleoperation() -> None:
     assert log.control_modes == ["manual"]
     assert log.solver_statuses == ["Teleoperation"]
     assert log.solve_times[0] == 0.0
-    assert log.controls[0, 0] == robot.parameters.track_speed_limit
-    assert log.controls[0, 1] == -robot.parameters.track_speed_limit
-    assert log.states[-1, 4] > log.states[0, 4]
+    np.testing.assert_allclose(
+        np.linalg.norm(log.controls[0, 0:2]),
+        parameters.body_speed_limit,
+    )
+    assert log.controls[0, 2] == 0.3
+    assert log.actuator_commands.shape == (1, 4)
+    assert np.any(np.abs(log.states[-1, 3:5] - log.states[0, 3:5]) > 0.0)
     assert log.predicted_states[-1].shape == (parameters.horizon_steps + 1, 5)
 
     assert session.step(command, stop_when_complete=False)

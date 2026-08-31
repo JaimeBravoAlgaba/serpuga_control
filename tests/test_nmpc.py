@@ -26,7 +26,7 @@ def test_short_horizon_solution_tracks_forward_reference() -> None:
     solution = controller.solve(
         state=np.zeros(5),
         preview=trajectory.preview(0.0, parameters.dt, parameters.horizon_steps),
-        previous_control=np.zeros(4),
+        previous_control=np.zeros(3),
         previous_world_velocity=np.zeros(2),
     )
     assert solution.success
@@ -53,15 +53,17 @@ def test_opposed_tracks_use_opposite_belt_speeds_for_forward_motion() -> None:
     solution = controller.solve(
         state=state,
         preview=trajectory.preview(0.0, parameters.dt, parameters.horizon_steps),
-        previous_control=np.zeros(4),
+        previous_control=np.zeros(3),
         previous_world_velocity=np.zeros(2),
     )
 
     assert solution.success
     assert solution.control[0] > 0.0
-    assert solution.control[1] < 0.0
+    assert abs(solution.control[1]) < 0.02
     assert solution.body_twist[0] > 0.20
-    projected_twist = model.body_twist(state[3:5], solution.control)
+    assert solution.actuator_command[2] > 0.0
+    assert solution.actuator_command[3] < 0.0
+    projected_twist = model.body_twist(solution.control)
     np.testing.assert_allclose(
         solution.body_twist,
         projected_twist,
@@ -87,7 +89,7 @@ def test_initial_yaw_offset_does_not_make_controller_infeasible() -> None:
     solution = controller.solve(
         state=state,
         preview=trajectory.preview(0.0, parameters.dt, parameters.horizon_steps),
-        previous_control=np.zeros(4),
+        previous_control=np.zeros(3),
         previous_world_velocity=np.zeros(2),
     )
 

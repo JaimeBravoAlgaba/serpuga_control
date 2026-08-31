@@ -17,8 +17,8 @@ robot:
   body_com_y_m: 0.0
   com_height_m: 0.24
   q1_min_deg: -70.0
-  q1_max_deg: 0.0
-  q2_min_deg: 0.0
+  q1_max_deg: 70.0
+  q2_min_deg: -70.0
   q2_max_deg: 70.0
   q1_nominal_deg: 0.0
   q2_nominal_deg: 0.0

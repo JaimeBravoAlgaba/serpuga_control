@@ -25,7 +25,14 @@ def _small_log() -> SimulationLog:
     return SimulationLog(
         times=times,
         states=states,
-        controls=np.zeros((3, 4), dtype=float),
+        controls=np.zeros((3, 3), dtype=float),
+        actuator_commands=np.column_stack(
+            (
+                states[:3, 3:5],
+                np.full(3, 0.27),
+                np.full(3, 0.27),
+            )
+        ),
         reference_poses=reference_poses,
         reference_speeds=np.full(3, 0.27),
         reference_yaw_rates=np.zeros(3),

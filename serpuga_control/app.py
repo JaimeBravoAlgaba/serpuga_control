@@ -283,24 +283,19 @@ class SimulationApplication:
         )
         toggle.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
 
-        self.teleop_speed_vars = [
+        self.teleop_twist_vars = [
             tk.DoubleVar(value=0.0),
-            tk.DoubleVar(value=0.0),
-        ]
-        self.teleop_q_vars = [
             tk.DoubleVar(value=0.0),
             tk.DoubleVar(value=0.0),
         ]
-        self.teleop_speed_scales: list[ttk.Scale] = []
-        self.teleop_q_scales: list[ttk.Scale] = []
+        self.teleop_twist_scales: list[ttk.Scale] = []
 
         rows = (
-            ("v1", "m/s", self.teleop_speed_vars[0], self.teleop_speed_scales),
-            ("v2", "m/s", self.teleop_speed_vars[1], self.teleop_speed_scales),
-            ("q1", "deg", self.teleop_q_vars[0], self.teleop_q_scales),
-            ("q2", "deg", self.teleop_q_vars[1], self.teleop_q_scales),
+            ("vx barra", "m/s", self.teleop_twist_vars[0]),
+            ("vy barra", "m/s", self.teleop_twist_vars[1]),
+            ("omega", "rad/s", self.teleop_twist_vars[2]),
         )
-        for row_index, (label, unit, variable, scales) in enumerate(rows, start=1):
+        for row_index, (label, unit, variable) in enumerate(rows, start=1):
             ttk.Label(panel, text=label).grid(
                 row=row_index, column=0, sticky="w", padx=(0, 7), pady=2
             )
@@ -311,7 +306,7 @@ class SimulationApplication:
                 command=lambda _value: self._sync_teleoperation_command(),
             )
             scale.grid(row=row_index, column=1, sticky="ew", pady=2)
-            scales.append(scale)
+            self.teleop_twist_scales.append(scale)
             entry = ttk.Entry(panel, textvariable=variable, width=8)
             entry.grid(row=row_index, column=2, sticky="e", padx=(8, 3), pady=2)
             ttk.Label(panel, text=unit, foreground="#667085").grid(
@@ -322,19 +317,20 @@ class SimulationApplication:
                 lambda *_args: self._sync_teleoperation_command(),
             )
 
+        ttk.Label(
+            panel,
+            text="La IK calcula q1, q2, v1 y v2 en cada periodo.",
+            foreground="#667085",
+        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 1))
+
         buttons = ttk.Frame(panel)
-        buttons.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(7, 0))
+        buttons.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(5, 0))
         buttons.columnconfigure(0, weight=1)
         ttk.Button(
             buttons,
-            text="Parar orugas",
-            command=self._stop_manual_tracks,
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        ttk.Button(
-            buttons,
-            text="Usar q actual",
-            command=self._capture_current_articulation,
-        ).grid(row=0, column=1, sticky="ew")
+            text="Detener movimiento",
+            command=self._stop_manual_motion,
+        ).grid(row=0, column=0, sticky="ew")
 
     def _configure_teleoperation_controls(
         self,
@@ -342,62 +338,51 @@ class SimulationApplication:
         *,
         reset_values: bool,
     ) -> None:
-        robot = configuration.robot
-        speed_limit = float(robot.track_speed_limit)
-        q_min = np.rad2deg(robot.q_min)
-        q_max = np.rad2deg(robot.q_max)
+        linear_limit = float(configuration.mpc.body_speed_limit)
+        yaw_limit = float(configuration.mpc.body_yaw_rate_limit)
 
         self._updating_teleoperation = True
         try:
-            for scale in self.teleop_speed_scales:
-                scale.configure(from_=-speed_limit, to=speed_limit)
-            for index, scale in enumerate(self.teleop_q_scales):
-                scale.configure(from_=float(q_min[index]), to=float(q_max[index]))
+            self.teleop_twist_scales[0].configure(
+                from_=-linear_limit,
+                to=linear_limit,
+            )
+            self.teleop_twist_scales[1].configure(
+                from_=-linear_limit,
+                to=linear_limit,
+            )
+            self.teleop_twist_scales[2].configure(
+                from_=-yaw_limit,
+                to=yaw_limit,
+            )
             if reset_values:
-                q_initial = np.rad2deg(configuration.simulation.initial_state[3:5])
-                self.teleop_speed_vars[0].set(0.0)
-                self.teleop_speed_vars[1].set(0.0)
-                self.teleop_q_vars[0].set(float(q_initial[0]))
-                self.teleop_q_vars[1].set(float(q_initial[1]))
+                for variable in self.teleop_twist_vars:
+                    variable.set(0.0)
                 self.teleop_enabled_var.set(False)
             else:
-                for index, variable in enumerate(self.teleop_q_vars):
+                for variable in self.teleop_twist_vars[0:2]:
                     variable.set(
-                        float(np.clip(variable.get(), q_min[index], q_max[index]))
+                        float(np.clip(variable.get(), -linear_limit, linear_limit))
                     )
-                for variable in self.teleop_speed_vars:
-                    variable.set(
-                        float(np.clip(variable.get(), -speed_limit, speed_limit))
+                self.teleop_twist_vars[2].set(
+                    float(
+                        np.clip(
+                            self.teleop_twist_vars[2].get(),
+                            -yaw_limit,
+                            yaw_limit,
+                        )
                     )
+                )
         finally:
             self._updating_teleoperation = False
         self._sync_teleoperation_command()
 
-    def _current_state(self) -> np.ndarray | None:
-        if self.last_log is not None and self.last_log.states.size:
-            return np.asarray(self.last_log.states[-1], dtype=float)
-        if self.current_configuration is not None:
-            return np.asarray(
-                self.current_configuration.simulation.initial_state,
-                dtype=float,
-            )
-        return None
-
-    def _capture_current_articulation(self) -> None:
-        state = self._current_state()
-        if state is None:
-            return
-        q = np.rad2deg(state[3:5])
-        self.teleop_q_vars[0].set(float(q[0]))
-        self.teleop_q_vars[1].set(float(q[1]))
-
-    def _stop_manual_tracks(self) -> None:
-        self.teleop_speed_vars[0].set(0.0)
-        self.teleop_speed_vars[1].set(0.0)
+    def _stop_manual_motion(self) -> None:
+        for variable in self.teleop_twist_vars:
+            variable.set(0.0)
 
     def _on_teleoperation_toggled(self) -> None:
         if self.teleop_enabled_var.get():
-            self._capture_current_articulation()
             self.status_var.set("Teleoperación manual · MPC desactivado")
         else:
             self.status_var.set("MPC activado")
@@ -411,21 +396,15 @@ class SimulationApplication:
         if self._updating_teleoperation:
             return
         try:
-            track_speeds = np.array(
-                [variable.get() for variable in self.teleop_speed_vars],
-                dtype=float,
-            )
-            q_targets_deg = np.array(
-                [variable.get() for variable in self.teleop_q_vars],
+            body_twist = np.array(
+                [variable.get() for variable in self.teleop_twist_vars],
                 dtype=float,
             )
         except (ValueError, tk.TclError):
             return
-        articulation_targets = np.deg2rad(q_targets_deg)
         command = TeleoperationCommand(
             enabled=bool(self.teleop_enabled_var.get()),
-            track_speeds=track_speeds,
-            articulation_targets=articulation_targets,
+            body_twist=body_twist,
         )
         with self.teleoperation_lock:
             self.teleoperation_command = command
@@ -435,8 +414,7 @@ class SimulationApplication:
             command = self.teleoperation_command
             return TeleoperationCommand(
                 enabled=command.enabled,
-                track_speeds=command.track_speeds.copy(),
-                articulation_targets=command.articulation_targets.copy(),
+                body_twist=command.body_twist.copy(),
             )
 
     def _refresh_profiles(self, select: str | None = None) -> None:
@@ -670,11 +648,7 @@ class SimulationApplication:
                         self.plot.update_log(log)
                         dt = self.current_configuration.mpc.dt
                         realtime_factor = min(1.0, dt / max(elapsed, dt))
-                        mode = (
-                            log.control_modes[-1]
-                            if log.control_modes
-                            else "mpc"
-                        )
+                        mode = log.control_modes[-1] if log.control_modes else "mpc"
                         mode_text = "manual" if mode == "manual" else "mpc"
                         self.metrics_var.set(
                             f"t={log.times[-1] + dt:.2f}s · modo={mode_text} · "

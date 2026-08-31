@@ -341,9 +341,11 @@ class OnlineSimulationPlot:
             return
         state = log.states[-1]
         current_control = log.controls[-1]
+        current_actuator = log.actuator_commands[-1]
+        track_speeds = current_actuator[2:4]
         self._expand_scene_to_state(state)
         self._expand_time_axis(float(log.times[-1] + self.configuration.mpc.dt))
-        self._update_robot(state, current_control[0:2])
+        self._update_robot(state, track_speeds)
         self.executed_path.set_data(log.states[:, 0], log.states[:, 1])
         prediction = log.predicted_states[-1]
         self.predicted_path.set_data(prediction[:, 0], prediction[:, 1])
@@ -371,7 +373,8 @@ class OnlineSimulationPlot:
         label = "MANUAL" if mode == "manual" else "ONLINE"
         self.telemetry.set_text(
             f"{label} · t={log.times[index] + self.configuration.mpc.dt:05.2f} s\n"
-            f"v1, v2  {current_control[0]: .3f}, {current_control[1]: .3f} m/s\n"
+            f"vx, vy   {current_control[0]: .3f}, {current_control[1]: .3f} m/s\n"
+            f"v1, v2   {track_speeds[0]: .3f}, {track_speeds[1]: .3f} m/s\n"
             f"v       {forward_speed[index]: .3f} / {log.reference_speeds[index]:.3f} m/s\n"
             f"omega   {log.body_twists[index, 2]: .3f} / "
             f"{log.reference_yaw_rates[index]:.3f} rad/s\n"
