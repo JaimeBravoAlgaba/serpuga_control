@@ -18,7 +18,8 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 - restricciones sobre todos los vértices del robot;
 - corredor sintético intercambiable por el futuro estimador láser;
 - estabilidad lateral geométrica o mediante ZMP aproximado;
-- simulación en horizonte recedente, pruebas y visualizador de diagnóstico.
+- simulación en horizonte recedente y reproductor gráfico en tiempo real;
+- pausa/reanudación, paso atrás y paso adelante sobre todo el historial.
 
 ## Estructura
 
@@ -31,7 +32,9 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 | `corridor.py` | Estimación sintética del espacio libre |
 | `nmpc.py` | Formulación y resolución del NMPC |
 | `simulation.py` | Bucle cerrado y métricas |
-| `visualization.py` | Dashboard del experimento |
+| `playback.py` | Estado de reproducción y navegación temporal |
+| `live_visualization.py` | Ventana interactiva en tiempo real |
+| `visualization.py` | Generador opcional de informes estáticos |
 | `cli.py` | Ejecución reproducible de escenarios |
 
 La formulación matemática se resume en [`docs/model.md`](docs/model.md).
@@ -52,14 +55,34 @@ Escenario con estrechamiento:
 python -m serpuga_control --scenario gap
 ```
 
+Tras calcular el historial del MPC se abre automáticamente la ventana y la
+simulación comienza a velocidad 1×. Los controles disponibles son:
+
+- **Pausa / Reanudar** (también con la barra espaciadora);
+- **Paso atrás** (también con `←`);
+- **Paso adelante** (también con `→`);
+- **Repetir** al llegar al último instante.
+
 Seguimiento con velocidad angular no nula y corredor abierto:
 
 ```bash
-python -m serpuga_control --scenario turn --output artifacts/turn.png
+python -m serpuga_control --scenario turn
 ```
 
-La imagen se guarda por defecto en `artifacts/serpuga_visualizer.png`. También
-se instala el comando equivalente:
+Para ejecutar únicamente el cálculo, por ejemplo en CI o en una terminal sin
+escritorio:
+
+```bash
+python -m serpuga_control --scenario gap --headless
+```
+
+Se puede guardar además una captura del reproductor sin cambiar el modo live:
+
+```bash
+python -m serpuga_control --scenario gap --screenshot artifacts/gap.png
+```
+
+También se instala el comando equivalente:
 
 ```bash
 serpuga-demo --scenario gap
@@ -86,4 +109,3 @@ realizable y la estabilidad emplea suelo plano, altura constante y una
 aproximación del ZMP. El siguiente nivel deberá introducir dinámica de
 actuadores, estimación de estado, incertidumbre del corredor y un modelo
 identificado de interacción oruga-terreno.
-

@@ -168,7 +168,10 @@ def plot_simulation_dashboard(
     )
 
     x_min = min(-0.35, float(np.min(log.states[:, 0])) - 0.35)
-    x_max = max(float(np.max(log.states[:, 0])) + 0.45, corridor.gap_end + 0.6)
+    x_max = float(np.max(log.states[:, 0])) + 0.45
+    has_narrowing = corridor.gap_width < corridor.open_width - 1.0e-9
+    if has_narrowing:
+        x_max = max(x_max, corridor.gap_end + 0.6)
     wall_x, upper_wall, lower_wall = corridor.wall_profiles(x_min, x_max)
     plot_height = 0.72
     scene.fill_between(
@@ -187,13 +190,14 @@ def plot_simulation_dashboard(
     )
     scene.plot(wall_x, upper_wall, color=COLOURS["ink"], linewidth=1.3)
     scene.plot(wall_x, lower_wall, color=COLOURS["ink"], linewidth=1.3)
-    scene.axvspan(
-        corridor.gap_start,
-        corridor.gap_end,
-        color=COLOURS["amber"],
-        alpha=0.10,
-        label="Hueco estrecho",
-    )
+    if has_narrowing:
+        scene.axvspan(
+            corridor.gap_start,
+            corridor.gap_end,
+            color=COLOURS["amber"],
+            alpha=0.10,
+            label="Hueco estrecho",
+        )
     scene.plot(
         log.reference_poses[:, 0],
         log.reference_poses[:, 1],

@@ -14,7 +14,7 @@ from .nmpc import NMPCController
 from .robot import RobotDescription
 from .simulation import run_closed_loop
 from .trajectory import ReferenceTrajectory
-from .visualization import plot_simulation_dashboard
+from .live_visualization import LiveSimulationPlayer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,12 +28,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Synthetic scenario to run.",
     )
     parser.add_argument(
-        "--output",
-        type=Path,
-        default=Path("artifacts/serpuga_visualizer.png"),
-        help="Destination of the visualiser dashboard.",
+        "--headless",
+        action="store_true",
+        help="Run without opening the real-time visualiser (for CI or remote shells).",
     )
-    parser.add_argument("--show", action="store_true", help="Open the Matplotlib window.")
+    parser.add_argument(
+        "--screenshot",
+        "--output",
+        dest="screenshot",
+        type=Path,
+        default=None,
+        help="Optionally save a frame of the live visualiser as a PNG.",
+    )
     parser.add_argument("--quiet", action="store_true", help="Suppress progress messages.")
     parser.add_argument(
         "--no-zmp",
@@ -86,16 +92,25 @@ def run_demo(arguments: argparse.Namespace):
         simulation_parameters=simulation_parameters,
         verbose=not arguments.quiet,
     )
-    output = plot_simulation_dashboard(
-        log=log,
-        robot=robot,
-        corridor=corridor,
-        mpc_parameters=mpc_parameters,
-        output_path=arguments.output,
-        show=arguments.show,
-    )
     print(json.dumps(log.summary(), indent=2, ensure_ascii=False))
-    print(f"Visualiser saved to {output.resolve()}")
+
+    player: LiveSimulationPlayer | None = None
+    if not arguments.headless or arguments.screenshot is not None:
+        player = LiveSimulationPlayer(
+            log=log,
+            robot=robot,
+            corridor=corridor,
+            mpc_parameters=mpc_parameters,
+        )
+    if arguments.screenshot is not None and player is not None:
+        screenshot = player.save_frame(arguments.screenshot)
+        print(f"Visualiser screenshot saved to {screenshot.resolve()}")
+    if not arguments.headless and player is not None:
+        if not arguments.quiet:
+            print("Opening real-time replay at 1x. Close the window to exit.")
+        player.show()
+    if player is not None:
+        player.close()
     return log
 
 
@@ -105,4 +120,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

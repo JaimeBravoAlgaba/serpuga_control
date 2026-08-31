@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "serpuga-control"
-version = "0.1.0"
+version = "0.2.0"
 description = "Kinematic NMPC prototype for a two-track reconfigurable robot"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,4 +28,3 @@ include = ["serpuga_control*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-
