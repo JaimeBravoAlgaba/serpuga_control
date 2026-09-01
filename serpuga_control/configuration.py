@@ -290,6 +290,14 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
         "Yaw rate máximo del cuerpo",
         "rad/s",
     ),
+    _field(
+        "MPC",
+        "Restricciones",
+        "mpc",
+        "articulation_rate_limit_rps",
+        "Velocidad articular máxima",
+        "rad/s",
+    ),
     # MPC · numerical model and solver
     _field("MPC", "Solver", "mpc", "regularisation", "Regularización"),
     _field("MPC", "Solver", "mpc", "smooth_epsilon", "Épsilon de suavizado"),
@@ -334,6 +342,7 @@ class ApplicationConfiguration:
             "mpc.dt": p.dt,
             "mpc.body_speed_limit": p.body_speed_limit,
             "mpc.body_yaw_rate_limit": p.body_yaw_rate_limit,
+            "mpc.articulation_rate_limit": p.articulation_rate_limit,
             "mpc.regularisation": p.regularisation,
             "mpc.smooth_epsilon": p.smooth_epsilon,
             "mpc.ipopt_tolerance": p.ipopt_tolerance,
@@ -489,6 +498,11 @@ class ApplicationConfiguration:
             if "track_alignment_weight" in sections["mpc"]
             else MPCParameters().parallelism_weight
         )
+        articulation_rate_limit = (
+            p("articulation_rate_limit_rps")
+            if "articulation_rate_limit_rps" in sections["mpc"]
+            else MPCParameters().articulation_rate_limit
+        )
         mpc = MPCParameters(
             dt=p("sample_time_s"),
             horizon_steps=integer("mpc", "horizon_steps"),
@@ -502,6 +516,7 @@ class ApplicationConfiguration:
             clearance_margin=p("clearance_margin_m"),
             body_speed_limit=p("body_speed_limit_mps"),
             body_yaw_rate_limit=p("body_yaw_rate_limit_rps"),
+            articulation_rate_limit=articulation_rate_limit,
             regularisation=p("regularisation"),
             smooth_epsilon=p("smooth_epsilon"),
             ipopt_max_iterations=integer("mpc", "ipopt_max_iterations"),
@@ -595,6 +610,7 @@ class ApplicationConfiguration:
                 "clearance_margin_m": float(p.clearance_margin),
                 "body_speed_limit_mps": float(p.body_speed_limit),
                 "body_yaw_rate_limit_rps": float(p.body_yaw_rate_limit),
+                "articulation_rate_limit_rps": float(p.articulation_rate_limit),
                 "regularisation": float(p.regularisation),
                 "smooth_epsilon": float(p.smooth_epsilon),
                 "ipopt_max_iterations": int(p.ipopt_max_iterations),
