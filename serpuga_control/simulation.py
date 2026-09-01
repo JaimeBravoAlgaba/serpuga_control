@@ -9,6 +9,7 @@ import numpy as np
 from .config import MPCParameters, SimulationParameters
 from .corridor import StraightGapCorridor
 from .kinematics import KinematicModel
+from .math_utils import J2_NUMPY
 from .nmpc import NMPCController, NMPCSolution
 from .robot import RobotDescription
 from .trajectory import ReferenceTrajectory, wrapped_angle_error
@@ -16,27 +17,29 @@ from .trajectory import ReferenceTrajectory, wrapped_angle_error
 
 @dataclass
 class TeleoperationCommand:
-    """Live bar-centre twist applied instead of the NMPC when enabled."""
+    """Legacy live body-twist request used only by the manual GUI mode.
+
+    The NMPC itself never uses a body-twist command.  Manual mode keeps the old
+    three sliders for compatibility and allocates belt speeds on the current
+    track axes without changing the articulation commands.
+    """
 
     enabled: bool = False
     body_twist: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
 
     def __post_init__(self) -> None:
-        body_twist = np.nan_to_num(
-            np.asarray(self.body_twist, dtype=float).reshape(3),
-            nan=0.0,
+        self.body_twist = np.nan_to_num(
+            np.asarray(self.body_twist, dtype=float).reshape(3), nan=0.0
         )
-        self.body_twist = body_twist
 
 
 @dataclass
 class SimulationLog:
     times: np.ndarray
-    states: np.ndarray
-    # Body-twist controls [v_x, v_y, omega].
+    # Direct actuator commands [q1_cmd, q2_cmd, v1, v2].
     controls: np.ndarray
-    # Analytic IK outputs [q1, q2, v1, v2].
     actuator_commands: np.ndarray
+    states: np.ndarray
     reference_poses: np.ndarray
     reference_speeds: np.ndarray
     reference_yaw_rates: np.ndarray
@@ -95,11 +98,7 @@ def _minimum_clearance(
 
 
 class ClosedLoopSession:
-    """Stateful receding-horizon simulation that advances exactly one step.
-
-    The GUI calls :meth:`step` from its worker thread and redraws the returned
-    history immediately.  No future control solution is precomputed.
-    """
+    """Stateful receding-horizon simulation advancing exactly one step."""
 
     def __init__(
         self,
@@ -152,41 +151,38 @@ class ClosedLoopSession:
         return len(self.times) * self.dt
 
     def _manual_control(self, command: TeleoperationCommand) -> np.ndarray:
+        """Allocate the legacy manual twist to belt speeds at fixed current q."""
+
         p = self.mpc_parameters
-        control = np.asarray(command.body_twist, dtype=float).reshape(3).copy()
-        linear_norm = np.linalg.norm(control[0:2])
+        twist = np.asarray(command.body_twist, dtype=float).reshape(3).copy()
+        linear_norm = np.linalg.norm(twist[0:2])
         if linear_norm > p.body_speed_limit:
-            control[0:2] *= p.body_speed_limit / linear_norm
-        control[2] = np.clip(
-            control[2],
-            -p.body_yaw_rate_limit,
-            p.body_yaw_rate_limit,
+            twist[0:2] *= p.body_speed_limit / linear_norm
+        twist[2] = np.clip(
+            twist[2], -p.body_yaw_rate_limit, p.body_yaw_rate_limit
         )
-        return control
+
+        q_command = self.state[3:5].copy()
+        belt = np.zeros(2, dtype=float)
+        for index, pivot in enumerate(self.robot.parameters.pivot_positions):
+            pivot_velocity = twist[0:2] + twist[2] * (J2_NUMPY @ pivot)
+            axis = np.array(
+                [np.cos(q_command[index]), np.sin(q_command[index])], dtype=float
+            )
+            belt[index] = float(np.dot(axis, pivot_velocity))
+        belt = np.clip(belt, -p.track_speed_limit, p.track_speed_limit)
+        return np.r_[q_command, belt]
 
     def _manual_solution(self, command: TeleoperationCommand) -> NMPCSolution:
         control = self._manual_control(command)
-        actuator_command = np.asarray(
-            self.model.actuator_commands(self.state[3:5], control),
-            dtype=float,
-        ).reshape(4)
         prediction_state = self.state.copy()
         predicted_states = [prediction_state.copy()]
         predicted_controls = []
         predicted_twists = []
-        predicted_actuator_commands = []
         for _ in range(self.mpc_parameters.horizon_steps):
             prediction_control = control.copy()
-            prediction_actuator = np.asarray(
-                self.model.actuator_commands(
-                    prediction_state[3:5],
-                    prediction_control,
-                ),
-                dtype=float,
-            ).reshape(4)
             prediction_twist = np.asarray(
-                self.model.body_twist(prediction_control),
-                dtype=float,
+                self.model.body_twist(prediction_control), dtype=float
             ).reshape(3)
             prediction_state = np.asarray(
                 self.model.discrete_step(prediction_state, prediction_control),
@@ -194,22 +190,18 @@ class ClosedLoopSession:
             ).reshape(5)
             predicted_controls.append(prediction_control.copy())
             predicted_twists.append(prediction_twist.copy())
-            predicted_actuator_commands.append(prediction_actuator.copy())
             predicted_states.append(prediction_state.copy())
+        body_twist = np.asarray(self.model.body_twist(control), dtype=float).reshape(3)
+        controls = np.asarray(predicted_controls, dtype=float).reshape((-1, 4))
         return NMPCSolution(
             success=True,
-            control=control,
-            body_twist=control.copy(),
-            actuator_command=actuator_command,
+            control=control.copy(),
+            body_twist=body_twist,
+            actuator_command=control.copy(),
             predicted_states=np.asarray(predicted_states, dtype=float),
-            predicted_controls=np.asarray(predicted_controls, dtype=float).reshape(
-                (-1, 3)
-            ),
+            predicted_controls=controls,
             predicted_twists=np.asarray(predicted_twists, dtype=float).reshape((-1, 3)),
-            predicted_actuator_commands=np.asarray(
-                predicted_actuator_commands,
-                dtype=float,
-            ).reshape((-1, 4)),
+            predicted_actuator_commands=controls.copy(),
             objective=0.0,
             solve_time=0.0,
             status="Teleoperation",
@@ -221,16 +213,12 @@ class ClosedLoopSession:
         *,
         stop_when_complete: bool = True,
     ) -> bool:
-        """Solve and apply one MPC interval; return whether it succeeded."""
-
         if self.finished:
             return False
 
         current_time = self.current_time
         preview = self.trajectory.preview(
-            current_time,
-            self.dt,
-            self.mpc_parameters.horizon_steps,
+            current_time, self.dt, self.mpc_parameters.horizon_steps
         )
         manual_enabled = command is not None and command.enabled
         if manual_enabled:
@@ -246,22 +234,20 @@ class ClosedLoopSession:
             self.statuses.append(solution.status)
             return False
 
-        control = solution.control
+        control = solution.control.copy()
         twist = solution.body_twist.copy()
         actuator_command = solution.actuator_command.copy()
         world_velocity = np.asarray(
             self.model.world_velocity_from_twist(self.state, twist), dtype=float
         ).reshape(2)
         slip = np.asarray(
-            self.model.slip_components(self.state[3:5], control),
-            dtype=float,
+            self.model.slip_components(self.state[3:5], control), dtype=float
         )
         centre_of_mass = np.asarray(
             self.robot.centre_of_mass_world(self.state), dtype=float
         )
         path_normal = np.array(
-            [-np.sin(preview.poses[0, 2]), np.cos(preview.poses[0, 2])],
-            dtype=float,
+            [-np.sin(preview.poses[0, 2]), np.cos(preview.poses[0, 2])], dtype=float
         )
         _, _, stability_margin = self.robot.lateral_stability_margins(
             self.state,
@@ -280,12 +266,8 @@ class ClosedLoopSession:
         self.world_velocities.append(world_velocity)
         self.slips.append(slip)
         self.stability_margins.append(float(stability_margin))
-        self.clearances.append(
-            _minimum_clearance(self.state, self.robot, self.corridor)
-        )
-        self.robot_widths.append(
-            self.robot.envelope_width(self.state, path_normal)
-        )
+        self.clearances.append(_minimum_clearance(self.state, self.robot, self.corridor))
+        self.robot_widths.append(self.robot.envelope_width(self.state, path_normal))
         self.corridor_widths.append(float(self.corridor.full_width(self.state[0])))
         self.solve_times.append(solution.solve_time)
         self.objectives.append(solution.objective)
@@ -312,25 +294,16 @@ class ClosedLoopSession:
         return True
 
     def to_log(self) -> SimulationLog:
-        """Return an immutable numeric snapshot of the history so far."""
-
         return SimulationLog(
             times=np.asarray(self.times, dtype=float),
+            controls=np.asarray(self.controls, dtype=float).reshape((-1, 4)),
+            actuator_commands=np.asarray(self.actuator_commands, dtype=float).reshape((-1, 4)),
             states=np.asarray(self.states, dtype=float),
-            controls=np.asarray(self.controls, dtype=float).reshape((-1, 3)),
-            actuator_commands=np.asarray(
-                self.actuator_commands,
-                dtype=float,
-            ).reshape((-1, 4)),
-            reference_poses=np.asarray(self.reference_poses, dtype=float).reshape(
-                (-1, 3)
-            ),
+            reference_poses=np.asarray(self.reference_poses, dtype=float).reshape((-1, 3)),
             reference_speeds=np.asarray(self.reference_speeds, dtype=float),
             reference_yaw_rates=np.asarray(self.reference_yaw_rates, dtype=float),
             body_twists=np.asarray(self.body_twists, dtype=float).reshape((-1, 3)),
-            world_velocities=np.asarray(self.world_velocities, dtype=float).reshape(
-                (-1, 2)
-            ),
+            world_velocities=np.asarray(self.world_velocities, dtype=float).reshape((-1, 2)),
             slips=np.asarray(self.slips, dtype=float).reshape((-1, 2, 2)),
             stability_margins=np.asarray(self.stability_margins, dtype=float),
             clearances=np.asarray(self.clearances, dtype=float),
@@ -355,8 +328,6 @@ def run_closed_loop(
     simulation_parameters: SimulationParameters,
     verbose: bool = True,
 ) -> SimulationLog:
-    """Run the same stepwise session to completion for headless workflows."""
-
     session = ClosedLoopSession(
         controller=controller,
         model=model,
