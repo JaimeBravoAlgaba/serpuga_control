@@ -88,3 +88,31 @@ def test_initial_yaw_offset_does_not_make_controller_infeasible() -> None:
     )
 
     assert solution.success
+
+
+def test_articulation_rate_limit_is_enforced_over_prediction() -> None:
+    parameters = MPCParameters(
+        horizon_steps=4,
+        articulation_rate_limit=0.25,
+    )
+    robot = RobotDescription(RobotParameters())
+    model = KinematicModel(robot, parameters)
+    corridor = StraightGapCorridor(
+        open_width=2.0,
+        gap_width=2.0,
+        gap_start=10.0,
+        gap_end=11.0,
+    )
+    controller = NMPCController(robot, model, corridor, parameters)
+    trajectory = ReferenceTrajectory.straight(2.0, parameters.dt, 0.25)
+    state = np.array([0.0, 0.0, 0.0, -0.35, 0.35], dtype=float)
+
+    solution = controller.solve(
+        state=state,
+        preview=trajectory.preview(0.0, parameters.dt, parameters.horizon_steps),
+    )
+
+    assert solution.success
+    q_prediction = solution.predicted_states[:, 3:5]
+    rates = np.diff(q_prediction, axis=0) / parameters.dt
+    assert np.max(np.abs(rates)) <= parameters.articulation_rate_limit + 1.0e-5
