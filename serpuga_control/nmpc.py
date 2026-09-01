@@ -94,6 +94,17 @@ class NMPCController:
             twist = self.model.body_twist(control)
 
             self.opti.subject_to(ca.sumsqr(control[0:2]) <= p.body_speed_limit**2)
+            articulation_rates = self.model.articulation_rates(
+                state[3:5],
+                control,
+            )
+            self.opti.subject_to(
+                self.opti.bounded(
+                    -p.articulation_rate_limit,
+                    articulation_rates,
+                    p.articulation_rate_limit,
+                )
+            )
 
             next_state = self.model.discrete_step(state, control)
             self.opti.subject_to(self.states[:, step + 1] == next_state)
@@ -300,9 +311,8 @@ class NMPCController:
                 dtype=float,
             ).reshape(self.state_dimension)
             if (
-                self._joint_configuration_feasible(desired_next)
-                and
-                self._numeric_width_residual(desired_next, reference_pose)
+                self._joint_transition_feasible(current, desired_next)
+                and self._numeric_width_residual(desired_next, reference_pose)
                 <= -2.0 * p.smooth_epsilon
             ):
                 selected_control = desired_control
@@ -345,6 +355,27 @@ class NMPCController:
         return bool(
             np.all(q >= r.q_min - tolerance)
             and np.all(q <= r.q_max + tolerance)
+        )
+
+    def _joint_transition_feasible(
+        self,
+        state: np.ndarray,
+        next_state: np.ndarray,
+    ) -> bool:
+        """Check position and average articulation-rate limits for one step."""
+
+        if not self._joint_configuration_feasible(next_state):
+            return False
+        tolerance = max(10.0 * self.parameters.ipopt_tolerance, 1.0e-6)
+        rates = (
+            np.asarray(next_state[3:5], dtype=float)
+            - np.asarray(state[3:5], dtype=float)
+        ) / self.parameters.dt
+        return bool(
+            np.all(
+                np.abs(rates)
+                <= self.parameters.articulation_rate_limit + tolerance
+            )
         )
 
     def _clearance_seed_control(
@@ -391,7 +422,7 @@ class NMPCController:
                     self.model.discrete_step(state, control),
                     dtype=float,
                 ).reshape(self.state_dimension)
-                if not self._joint_configuration_feasible(next_state):
+                if not self._joint_transition_feasible(state, next_state):
                     continue
                 residual = self._numeric_width_residual(
                     next_state,
@@ -508,7 +539,7 @@ class NMPCController:
         controls: np.ndarray,
         preview: ReferencePreview,
     ) -> bool:
-        """Check the four hard inequality families on a numeric rollout."""
+        """Check the five hard inequality families on a numeric rollout."""
 
         p = self.parameters
         r = self.robot.parameters
@@ -518,6 +549,12 @@ class NMPCController:
         if np.any(states[3:5, :] < r.q_min[:, None] - tolerance):
             return False
         if np.any(states[3:5, :] > r.q_max[:, None] + tolerance):
+            return False
+        articulation_rates = np.diff(states[3:5, :], axis=1) / p.dt
+        if np.any(
+            np.abs(articulation_rates)
+            > p.articulation_rate_limit + tolerance
+        ):
             return False
         if np.any(np.linalg.norm(controls[0:2, :], axis=0) > p.body_speed_limit + tolerance):
             return False
@@ -578,7 +615,7 @@ class NMPCController:
             predicted_actuator_commands=actuator_commands.T,
             objective=objective,
             solve_time=elapsed,
-            status=f"{status} (feasible geometric fallback)",
+            status=f"{status} (feasible constrained fallback)",
         )
 
     def _successful_solution(

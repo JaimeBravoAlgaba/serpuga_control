@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from serpuga_control import MPCParameters
 from serpuga_control.configuration import (
     ConfigurationError,
     ConfigurationStore,
@@ -32,6 +33,7 @@ def test_form_values_round_trip_and_allow_gap_editing() -> None:
         configuration.simulation.initial_state,
     )
     assert "mpc.parallelism_weight" in values
+    assert "mpc.articulation_rate_limit_rps" in values
     assert "mpc.slip_weight" not in values
     assert "mpc.minimum_stability_margin_m" not in values
 
@@ -60,6 +62,16 @@ def test_legacy_mpc_profile_maps_alignment_weight_to_parallelism() -> None:
     restored = configuration.from_mapping(mapping)
 
     assert restored.mpc.parallelism_weight == 17.0
+
+
+def test_legacy_profile_without_articulation_rate_limit_uses_default() -> None:
+    configuration = ConfigurationStore(BUILTIN_CONFIGS).load("default")
+    mapping = configuration.to_mapping()
+    mapping["mpc"].pop("articulation_rate_limit_rps")
+
+    restored = configuration.from_mapping(mapping)
+
+    assert restored.mpc.articulation_rate_limit == MPCParameters().articulation_rate_limit
 
 
 def test_profile_can_be_saved_and_loaded(tmp_path) -> None:
