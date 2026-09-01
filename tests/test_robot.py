@@ -18,6 +18,44 @@ def test_symmetric_folding_reduces_lateral_envelope() -> None:
     assert robot.envelope_width(folded, normal) < robot.envelope_width(parallel, normal)
 
 
+def test_parallelism_residual_accepts_parallel_and_antiparallel_axes() -> None:
+    robot = RobotDescription(RobotParameters())
+
+    assert np.isclose(robot.parallelism_residual(np.array([0.3, 0.3])), 0.0)
+    assert np.isclose(
+        robot.parallelism_residual(np.array([0.3, 0.3 + np.pi])),
+        0.0,
+        atol=1.0e-12,
+    )
+    assert np.isclose(
+        abs(robot.parallelism_residual(np.array([0.0, 0.5 * np.pi]))),
+        1.0,
+    )
+
+
+def test_centred_width_includes_lateral_tracking_offset() -> None:
+    robot = RobotDescription(RobotParameters())
+    centred = np.zeros(5)
+    offset = centred.copy()
+    offset[1] = 0.08
+    normal = np.array([0.0, 1.0])
+
+    centred_width = robot.centred_envelope_width_expression(
+        centred,
+        np.zeros(2),
+        normal,
+        epsilon=1.0e-3,
+    )
+    offset_width = robot.centred_envelope_width_expression(
+        offset,
+        np.zeros(2),
+        normal,
+        epsilon=1.0e-3,
+    )
+
+    assert offset_width > centred_width
+
+
 def test_centre_of_mass_stays_finite_across_configuration() -> None:
     robot = RobotDescription(RobotParameters())
     for angle in np.linspace(0.0, np.deg2rad(60.0), 8):

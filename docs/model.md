@@ -110,8 +110,9 @@ explícita:
 \dot q_i=\frac{q_i^*-q_i}{\Delta t}.
 \]
 
-El MPC limita esta velocidad y su variación. Esta aproximación permite separar
-la cinemática inversa del futuro modelo dinámico de los actuadores.
+Esta velocidad queda disponible como diagnóstico, pero no se limita en la
+formulación simplificada. La aproximación permite separar la cinemática inversa
+del futuro modelo dinámico de los actuadores.
 
 ## Deslizamiento de una huella finita
 
@@ -139,10 +140,10 @@ s_i=u_{c,i}-v_i^*e(q_i).
 \]
 
 Así, el contacto puntual de la inversa puede ser exacto y, al mismo tiempo, el
-modelo puede reflejar deslizamiento transitorio durante la reorientación y
-*scrubbing* debido a la longitud finita de la huella. El MPC penaliza las
-componentes longitudinal y lateral con pesos distintos y puede imponer una
-cota máxima a la componente lateral.
+simulador puede mostrar deslizamiento transitorio durante la reorientación y
+*scrubbing* debido a la longitud finita de la huella. Estas magnitudes se
+registran como diagnósticos: no forman parte del coste ni de las restricciones
+del MPC simplificado.
 
 ## Formulación del MPC
 
@@ -153,46 +154,85 @@ u_k=[v_{x,k},\,v_{y,k},\,\omega_k]^T.
 \]
 
 Dentro del grafo simbólico de CasADi se evalúa la cinemática inversa para
-obtener \(q_{i,k}^*\), \(v_{i,k}^*\) y \(\dot q_{i,k}\). Sobre estas magnitudes
-se aplican:
-
-- límites de velocidad y aceleración de las bandas;
-- límites de posición, velocidad y aceleración articular;
-- cota de velocidad lineal y angular de la barra;
-- restricciones de deslizamiento lateral;
-- restricciones geométricas del corredor para todos los vértices;
-- margen mínimo de estabilidad geométrica o basado en ZMP.
-
-El coste conserva el seguimiento de posición, orientación, velocidad lineal y
-angular, junto con deslizamiento, *scrubbing*, esfuerzo de bandas, velocidad
-articular, suavidad del *twist*, configuración nominal y estabilidad.
-
-Una consecuencia importante es que la forma del robot ya no puede elegirse de
-manera independiente: debe ser compatible con el movimiento instantáneo de la
-barra. Para estrecharse, el MPC busca una secuencia de \(v_x\), \(v_y\) y
-\(\omega\) cuya cinemática inversa produzca configuraciones que entren en el
-hueco y respeten simultáneamente el seguimiento y la estabilidad.
-
-## Corredor y estabilidad
-
-Cada vértice de ambas huellas y del conector debe satisfacer
+obtener \(q_{i,k}^*\) y \(v_{i,k}^*\). El coste de etapa contiene únicamente
+seguimiento y paralelismo:
 
 \[
-y_{lower}(x)+\delta \le y_j \le y_{upper}(x)-\delta.
+\begin{aligned}
+\ell_k={}&w_p\|p_k-p_k^r\|^2
++2w_\psi[1-\cos(\psi_k-\psi_k^r)]\\
+&+w_v\|v_k^W-v_k^r\|^2
++w_\omega(\omega_k-\omega_k^r)^2\\
+&+w_{\parallel}\sin^2(q_{1,k}-q_{2,k}).
+\end{aligned}
 \]
 
-`StraightGapCorridor` simula la salida del futuro bloque de percepción. Para
-la estabilidad, el soporte lateral se obtiene proyectando las esquinas de las
-orugas sobre la normal de la trayectoria. Cuando se activa la aproximación ZMP,
-el punto evaluado es
+El último término vale cero tanto si las orugas apuntan en el mismo sentido
+como si sus direcciones difieren \(180^\circ\). Por tanto mide el paralelismo
+de sus ejes físicos, no el signo de las velocidades de banda. Se añaden los
+términos terminales de posición y orientación de la misma referencia.
+
+La formulación conserva solo cuatro familias de desigualdades. La condición
+inicial y la dinámica se imponen mediante disparo múltiple:
 
 \[
-p_{ZMP}=c_{xy}-\frac{h}{g}a_{xy}.
+x_0=x_{medido},\qquad x_{k+1}=f(x_k,u_k),
 \]
 
-Se exige un margen mínimo respecto a ambos extremos del intervalo de soporte.
-Sigue siendo una aproximación bidimensional sobre suelo plano, no un modelo
-dinámico completo de vuelco.
+\[
+q_{min}\le q_k\le q_{max},
+\qquad
+\|[v_x,v_y]^T\|_2\le v_{max},
+\qquad
+|\omega|\le\omega_{max},
+\]
+
+\[
+W_{robot}(x_k,n_k)\le W_{libre}(X_k)-2\delta.
+\]
+
+No hay cotas de deslizamiento, ZMP, velocidad o aceleración articular, bandas,
+*scrubbing*, simetría ni restricciones independientes por vértice.
+
+## Restricción única de anchura
+
+Sea \(n_k=[-\sin\psi_k^r,\cos\psi_k^r]^T\) la normal a la trayectoria. La
+anchura centrada que necesita la formación, incluyendo ambas orugas, el brazo
+y cualquier error lateral respecto al centro de la trayectoria, es
+
+\[
+W_{robot}=2\max_{z_j\in\mathcal F}
+\left|n_k^T(z_j-p_k^r)\right|,
+\]
+
+donde \(\mathcal F\) contiene los doce vértices de la huella geométrica. Para
+anticipar una transición, el ancho disponible es el menor valor del corredor
+bajo toda la huella longitudinal:
+
+\[
+W_{libre}=\min_{z_j\in\mathcal F}W_{corredor}(z_{j,x}).
+\]
+
+En el grafo simbólico se emplean máximos y mínimos suavizados con
+\(\varepsilon=10^{-3}\). `StraightGapCorridor` simula el valor que más adelante
+proporcionará el bloque láser. Aunque se evalúen los vértices para calcular
+ambos escalares, el optimizador recibe una sola desigualdad de anchura por
+instante, no una restricción independiente por vértice.
+
+La referencia \(p_k^r\) hace que la misma magnitud incluya el centrado lateral.
+El margen de soporte geométrico, la holgura real vértice-pared y el
+deslizamiento se siguen calculando solo para diagnóstico y validación posterior.
+
+Si IPOPT consume su presupuesto de tiempo, el controlador no aplica una
+iteración arbitraria: conserva o reconstruye una secuencia y comprueba
+numéricamente dinámica, articulaciones, módulo de velocidad, velocidad angular
+y anchura antes de usar su primer mando. Esta reserva no introduce un objetivo
+nuevo; solo mantiene una salida factible en ejecución online.
+
+Eliminar velocidades articulares y deslizamiento es deliberado, pero tiene una
+consecuencia visible: el servo ideal puede pedir cambios grandes de \(q_i\) y el
+diagnóstico de *slip* de huella puede crecer. Debe interpretarse como una
+limitación de esta versión mínima, no como una predicción apta para hardware.
 
 ## Simulación y teleoperación
 

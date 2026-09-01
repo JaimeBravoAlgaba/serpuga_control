@@ -220,7 +220,7 @@ class OnlineSimulationPlot:
         )
 
     def _build_safety(self) -> None:
-        self.safety.set_title("Deslizamiento y seguridad", loc="left", fontsize=10)
+        self.safety.set_title("Diagnósticos (no restringidos)", loc="left", fontsize=10)
         self.safety.set_xlabel("Tiempo [s]")
         self.safety.set_ylabel("m o m/s")
         self.safety.set_xlim(0.0, self.duration)
@@ -231,7 +231,7 @@ class OnlineSimulationPlot:
             [], [], color=COLOURS["violet"], label="Slip 2"
         )
         (self.stability_line,) = self.safety.plot(
-            [], [], color=COLOURS["amber"], linewidth=1.8, label="Margen ZMP"
+            [], [], color=COLOURS["amber"], linewidth=1.8, label="Margen soporte"
         )
         (self.clearance_line,) = self.safety.plot(
             [],
@@ -240,12 +240,7 @@ class OnlineSimulationPlot:
             linestyle="--",
             label="Holgura",
         )
-        self.safety.axhline(
-            self.configuration.mpc.minimum_stability_margin,
-            color=COLOURS["red"],
-            linestyle=":",
-            linewidth=1.0,
-        )
+        self.safety.axhline(0.0, color=COLOURS["red"], linestyle=":", linewidth=1.0)
         self._style_axis(self.safety)
         self.safety.legend(loc="upper right", frameon=False, fontsize=7, ncol=2)
 
@@ -380,7 +375,7 @@ class OnlineSimulationPlot:
             f"{log.reference_yaw_rates[index]:.3f} rad/s\n"
             f"q1, q2  {q[0]: .1f}, {q[1]: .1f} deg\n"
             f"slip    {slip[index, 0]: .3f}, {slip[index, 1]:.3f} m/s\n"
-            f"ZMP     {log.stability_margins[index]: .3f} m   "
+            f"soporte {log.stability_margins[index]: .3f} m   "
             f"clear {log.clearances[index]:.3f} m"
         )
         self._draw()

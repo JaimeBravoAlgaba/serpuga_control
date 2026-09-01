@@ -2,8 +2,8 @@
 
 Prototipo en Python de control predictivo no lineal para un robot formado por
 dos orugas reconfigurables. El controlador sigue una trayectoria con referencias
-de velocidad lineal y angular, minimiza el deslizamiento, adapta la envolvente
-del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
+de velocidad lineal y angular, favorece que las orugas permanezcan paralelas y
+adapta la envolvente completa del robot al ancho libre de un corredor.
 
 ## Qué incluye
 
@@ -11,14 +11,13 @@ del robot a un corredor estrecho y conserva un margen lateral de estabilidad.
 - control predictivo mediante el *twist* del centro de la barra
   `[vx, vy, omega]`;
 - cinemática inversa analítica que obtiene `[q1, q2, v1, v2]` en cada periodo;
-- modelo de huella con contribución de `q_dot` cuando el pivote no coincide con
-  su centro;
 - velocidades de banda firmadas, permitiendo avance y retroceso por oruga;
-- deslizamiento longitudinal, lateral y término de *scrubbing*;
 - NMPC de disparo múltiple implementado con CasADi/IPOPT;
-- restricciones sobre todos los vértices del robot;
+- coste de paralelismo invariante ante una diferencia de 180 grados;
+- una única desigualdad geométrica `ancho_robot <= ancho_libre - 2*margen`;
 - corredor sintético intercambiable por el futuro estimador láser;
-- estabilidad lateral geométrica o mediante ZMP aproximado;
+- deslizamiento, soporte y holgura conservados como diagnósticos no restringidos;
+- reserva geométrica comprobada cuando IPOPT agota su presupuesto online;
 - aplicación gráfica con configuración completa y perfiles YAML;
 - simulación online: cada paso MPC se resuelve, aplica y dibuja inmediatamente;
 - teleoperación manual en vivo mediante `vx`, `vy` y `omega`, con las consignas
@@ -79,10 +78,10 @@ python -m serpuga_control
 La ventana se abre con el robot, el corredor y la simulación online ya
 inicializados. A la derecha aparecen cuatro pestañas:
 
-- **Robot**: geometría, masas, articulaciones, actuadores y pesos de contacto;
+- **Robot**: geometría, masas y límites de posición de las articulaciones;
 - **Escenario**: anchuras, posición y transición del hueco;
 - **Simulación**: estado inicial, duración y referencias constantes `v` y `ω`;
-- **MPC**: horizonte, costes, restricciones, ZMP y opciones de IPOPT.
+- **MPC**: horizonte, seguimiento, paralelismo, anchura y opciones de IPOPT.
 
 La simulación corre en tiempo real desde que se carga un perfil. El panel de
 **Teleoperación** permite activar **Modo manual**, que deja de resolver el MPC y
@@ -107,7 +106,7 @@ valores actuales.
 Se incluyen tres ejemplos editables:
 
 - `default.yaml`: orugas antiparalelas y hueco de 0,61 m;
-- `parallel-gap.yaml`: partida paralela con giro bilateral de ambas orugas;
+- `parallel-gap.yaml`: referencia base paralela y hueco que conserva esa forma;
 - `open-turn.yaml`: corredor abierto y referencia angular no nula.
 
 También puede elegirse el perfil inicial al abrir la interfaz:
@@ -140,18 +139,18 @@ pytest
 
 ## Resultado de referencia
 
-Con los parámetros de demostración, el robot empieza a plegarse antes del
-hueco, mantiene 10 mm de separación mínima respecto al corredor y recupera la
-configuración paralela tras salir. Los resultados exactos dependen del equipo y
-se imprimen como JSON al terminar cada ejecución.
+Con los parámetros de demostración, el robot anticipa el estrechamiento, hace
+compatible su anchura con el hueco y vuelve a favorecer el paralelismo al
+salir. Los resultados exactos dependen del equipo y se imprimen como JSON al
+terminar cada ejecución. La primera resolución incluye la construcción interna
+del solver y suele tardar más que los ciclos siguientes.
 
 ## Alcance actual
 
 Este repositorio valida la arquitectura y la optimización cinemática en 2D. No
 es todavía un controlador listo para hardware: el *twist* es la orden
 cinemática de alto nivel y se supone un servo articular ideal por periodo. La
-inversa es exacta en los pivotes puntuales, mientras que el modelo de huella
-finita conserva deslizamiento transitorio y *scrubbing*. La estabilidad emplea
-suelo plano, altura constante y una aproximación del ZMP. El siguiente nivel
-deberá introducir dinámica de actuadores, estimación de estado, incertidumbre
-del corredor y un modelo identificado de interacción oruga-terreno.
+inversa es exacta en los pivotes puntuales y se supone un servo articular ideal.
+Los límites de banda y articulación, el deslizamiento y la estabilidad dinámica
+no se imponen en esta versión deliberadamente mínima. El siguiente nivel deberá
+validar esos efectos antes de llevar el controlador a hardware.

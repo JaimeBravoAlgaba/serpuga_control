@@ -11,7 +11,7 @@ import numpy as np
 from .config import MPCParameters
 from .corridor import StraightGapCorridor
 from .kinematics import KinematicModel
-from .math_utils import J2_NUMPY, smooth_max
+from .math_utils import J2_NUMPY, smooth_minimum
 from .robot import RobotDescription
 from .trajectory import ReferencePreview
 
@@ -52,7 +52,9 @@ class NMPCController:
         self.parameters = parameters
         self._last_states: np.ndarray | None = None
         self._last_controls: np.ndarray | None = None
-        self._clearance_seed_cache: dict[tuple[float, ...], np.ndarray] = {}
+        self._seed_control_cache: dict[
+            tuple[float, ...], tuple[np.ndarray, np.ndarray]
+        ] = {}
         self._build_problem()
 
     def _build_problem(self) -> None:
@@ -65,10 +67,6 @@ class NMPCController:
         self.controls = self.opti.variable(self.control_dimension, n)
 
         self.initial_state = self.opti.parameter(self.state_dimension)
-        self.previous_control = self.opti.parameter(self.control_dimension)
-        self.previous_track_speeds = self.opti.parameter(2)
-        self.previous_articulation_rates = self.opti.parameter(2)
-        self.previous_world_velocity = self.opti.parameter(2)
         self.reference_poses = self.opti.parameter(3, n + 1)
         self.reference_speeds = self.opti.parameter(1, n)
         self.reference_yaw_rates = self.opti.parameter(1, n)
@@ -83,13 +81,6 @@ class NMPCController:
         )
         self.opti.subject_to(
             self.opti.bounded(
-                -p.body_speed_limit,
-                self.controls[0:2, :],
-                p.body_speed_limit,
-            )
-        )
-        self.opti.subject_to(
-            self.opti.bounded(
                 -p.body_yaw_rate_limit,
                 self.controls[2, :],
                 p.body_yaw_rate_limit,
@@ -97,66 +88,17 @@ class NMPCController:
         )
 
         objective = 0
-        previous_velocity_expression = self.previous_world_velocity
-        previous_track_speed_expression = self.previous_track_speeds
-        previous_articulation_rate_expression = self.previous_articulation_rates
-
         for step in range(n):
             state = self.states[:, step]
             control = self.controls[:, step]
             twist = self.model.body_twist(control)
-            inverse = self.model.inverse_kinematics(twist, state[3:5])
-            track_speeds = inverse.track_speeds
-            articulation_rates = (inverse.articulation_angles - state[3:5]) / p.dt
 
             self.opti.subject_to(ca.sumsqr(control[0:2]) <= p.body_speed_limit**2)
-            self.opti.subject_to(
-                self.opti.bounded(
-                    -r.track_speed_limit,
-                    track_speeds,
-                    r.track_speed_limit,
-                )
-            )
-            self.opti.subject_to(
-                self.opti.bounded(
-                    -r.articulation_rate_limit,
-                    articulation_rates,
-                    r.articulation_rate_limit,
-                )
-            )
-
-            track_speed_change = track_speeds - previous_track_speed_expression
-            articulation_rate_change = (
-                articulation_rates - previous_articulation_rate_expression
-            )
-            self.opti.subject_to(
-                self.opti.bounded(
-                    -r.track_acceleration_limit * p.dt,
-                    track_speed_change,
-                    r.track_acceleration_limit * p.dt,
-                )
-            )
-            self.opti.subject_to(
-                self.opti.bounded(
-                    -r.articulation_acceleration_limit * p.dt,
-                    articulation_rate_change,
-                    r.articulation_acceleration_limit * p.dt,
-                )
-            )
 
             next_state = self.model.discrete_step(state, control)
             self.opti.subject_to(self.states[:, step + 1] == next_state)
 
             world_velocity = self.model.world_velocity(state, control)
-            slip = self.model.slip_components(state[3:5], control)
-            self.opti.subject_to(
-                self.opti.bounded(
-                    -p.maximum_lateral_slip,
-                    slip[:, 1],
-                    p.maximum_lateral_slip,
-                )
-            )
-
             desired_heading = self.reference_poses[2, step]
             desired_world_velocity = self.reference_speeds[0, step] * ca.vertcat(
                 ca.cos(desired_heading),
@@ -164,97 +106,34 @@ class NMPCController:
             )
             position_error = state[0:2] - self.reference_poses[0:2, step]
             heading_error = state[2] - desired_heading
-            heading_excess = smooth_max(
-                ca.sqrt(heading_error**2 + p.smooth_epsilon**2)
-                - p.maximum_heading_error,
-                0.0,
-                p.smooth_epsilon,
-            )
             velocity_error = world_velocity - desired_world_velocity
             yaw_rate_error = twist[2] - self.reference_yaw_rates[0, step]
-
-            slip_cost = 0
-            scrub_cost = 0
-            for track_index in range(2):
-                slip_cost += (
-                    r.longitudinal_slip_weight * slip[track_index, 0] ** 2
-                    + r.lateral_slip_weight * slip[track_index, 1] ** 2
-                )
-                scrub_cost += (twist[2] + articulation_rates[track_index]) ** 2
-
-            if step == 0:
-                control_change = control - self.previous_control
-            else:
-                control_change = control - self.controls[:, step - 1]
+            parallelism_error = self.robot.parallelism_residual(state[3:5])
 
             objective += p.position_weight * ca.sumsqr(position_error)
             objective += p.heading_weight * 2.0 * (1.0 - ca.cos(heading_error))
-            objective += p.heading_weight * heading_excess**2
             objective += p.velocity_weight * ca.sumsqr(velocity_error)
             objective += p.yaw_rate_weight * yaw_rate_error**2
-            objective += p.slip_weight * slip_cost
-            objective += p.scrub_weight * scrub_cost
-            objective += p.track_effort_weight * ca.sumsqr(track_speeds)
-            objective += p.articulation_rate_weight * ca.sumsqr(articulation_rates)
-            objective += p.input_rate_weight * ca.sumsqr(control_change)
+            objective += p.parallelism_weight * parallelism_error**2
 
-            for track_index in range(2):
-                track_heading_error = (
-                    state[2]
-                    + state[3 + track_index]
-                    - desired_heading
-                    - r.nominal_configuration[track_index]
-                )
-                objective += (
-                    p.track_alignment_weight * 2.0 * (1.0 - ca.cos(track_heading_error))
-                )
-            symmetry_reference = float(
-                np.dot(r.symmetry_coupling, r.nominal_configuration)
-            )
-            symmetry_expression = ca.dot(ca.DM(r.symmetry_coupling), state[3:5])
-            objective += (
-                p.symmetry_weight * (symmetry_expression - symmetry_reference) ** 2
-            )
-            objective += p.nominal_configuration_weight * ca.sumsqr(
-                state[3:5] - ca.DM(r.nominal_configuration)
+            self._add_width_constraint(
+                state,
+                self.reference_poses[0:2, step],
+                self.reference_poses[2, step],
             )
 
-            world_acceleration = (world_velocity - previous_velocity_expression) / p.dt
-            centre_of_mass = self.robot.centre_of_mass_world(state)
-            if p.use_zmp:
-                evaluation_point = (
-                    centre_of_mass - (r.com_height / p.gravity) * world_acceleration
-                )
-            else:
-                evaluation_point = centre_of_mass
-            path_normal = ca.vertcat(-ca.sin(desired_heading), ca.cos(desired_heading))
-            lower_margin, upper_margin, stability_margin = (
-                self.robot.lateral_stability_margins(
-                    state,
-                    path_normal,
-                    evaluation_point,
-                    p.smooth_epsilon,
-                )
-            )
-            self.opti.subject_to(lower_margin >= p.minimum_stability_margin)
-            self.opti.subject_to(upper_margin >= p.minimum_stability_margin)
-            stability_deficit = smooth_max(
-                p.target_stability_margin - stability_margin,
-                0.0,
-                p.smooth_epsilon,
-            )
-            objective += p.stability_weight * stability_deficit**2
-            objective -= 0.05 * p.stability_weight * stability_margin
-
-            self._add_corridor_constraints(state)
-            previous_velocity_expression = world_velocity
-            previous_track_speed_expression = track_speeds
-            previous_articulation_rate_expression = articulation_rates
-
-        self._add_corridor_constraints(self.states[:, n])
-
-        terminal_position_error = self.states[0:2, n] - self.reference_poses[0:2, n]
-        terminal_heading_error = self.states[2, n] - self.reference_poses[2, n]
+        terminal_state = self.states[:, n]
+        self._add_width_constraint(
+            terminal_state,
+            self.reference_poses[0:2, n],
+            self.reference_poses[2, n],
+        )
+        terminal_parallelism_error = self.robot.parallelism_residual(
+            terminal_state[3:5]
+        )
+        objective += p.parallelism_weight * terminal_parallelism_error**2
+        terminal_position_error = terminal_state[0:2] - self.reference_poses[0:2, n]
+        terminal_heading_error = terminal_state[2] - self.reference_poses[2, n]
         objective += p.terminal_position_weight * ca.sumsqr(terminal_position_error)
         objective += (
             p.terminal_heading_weight * 2.0 * (1.0 - ca.cos(terminal_heading_error))
@@ -262,6 +141,17 @@ class NMPCController:
 
         self.opti.minimize(objective)
         self.objective_expression = objective
+        self._objective_function = ca.Function(
+            "nmpc_objective",
+            [
+                self.states,
+                self.controls,
+                self.reference_poses,
+                self.reference_speeds,
+                self.reference_yaw_rates,
+            ],
+            [objective],
+        )
 
         plugin_options = {"expand": True, "print_time": False}
         solver_options = {
@@ -274,40 +164,42 @@ class NMPCController:
         }
         self.opti.solver("ipopt", plugin_options, solver_options)
 
-    def _add_corridor_constraints(self, state: ca.MX) -> None:
-        margin = self.parameters.clearance_margin
-        for vertex in self.robot.footprint_vertices_world(state):
-            lower, upper = self.corridor.lateral_bounds(vertex[0])
-            self.opti.subject_to(vertex[1] >= lower + margin)
-            self.opti.subject_to(vertex[1] <= upper - margin)
+    def _add_width_constraint(
+        self,
+        state: ca.MX,
+        path_position: ca.MX,
+        path_heading: ca.MX,
+    ) -> None:
+        """Require the complete formation to fit in the perceived gap.
+
+        Reference tracking keeps the bar on the corridor centreline.  This
+        single geometric inequality only compares the robot envelope along
+        the path normal with the locally available width.
+        """
+
+        path_normal = ca.vertcat(-ca.sin(path_heading), ca.cos(path_heading))
+        robot_width = self.robot.centred_envelope_width_expression(
+            state,
+            path_position,
+            path_normal,
+            self.parameters.smooth_epsilon,
+        )
+        footprint_widths = [
+            self.corridor.full_width(vertex[0])
+            for vertex in self.robot.footprint_vertices_world(state)
+        ]
+        available_width = (
+            smooth_minimum(footprint_widths, self.parameters.smooth_epsilon)
+            - 2.0 * self.parameters.clearance_margin
+        )
+        self.opti.subject_to(robot_width <= available_width)
 
     def _set_parameters(
         self,
         state: np.ndarray,
         preview: ReferencePreview,
-        previous_control: np.ndarray,
-        previous_world_velocity: np.ndarray,
-        previous_track_speeds: np.ndarray | None,
-        previous_articulation_rates: np.ndarray | None,
     ) -> None:
-        if previous_track_speeds is None or previous_articulation_rates is None:
-            inverse = self.model.inverse_kinematics(previous_control, state[3:5])
-            if previous_track_speeds is None:
-                previous_track_speeds = np.asarray(
-                    inverse.track_speeds,
-                    dtype=float,
-                ).reshape(2)
-            if previous_articulation_rates is None:
-                previous_articulation_rates = np.zeros(2, dtype=float)
-
         self.opti.set_value(self.initial_state, state)
-        self.opti.set_value(self.previous_control, previous_control)
-        self.opti.set_value(self.previous_track_speeds, previous_track_speeds)
-        self.opti.set_value(
-            self.previous_articulation_rates,
-            previous_articulation_rates,
-        )
-        self.opti.set_value(self.previous_world_velocity, previous_world_velocity)
         self.opti.set_value(self.reference_poses, preview.poses.T)
         self.opti.set_value(self.reference_speeds, preview.speeds.reshape((1, -1)))
         self.opti.set_value(
@@ -360,9 +252,8 @@ class NMPCController:
         state: np.ndarray,
         preview: ReferencePreview,
     ) -> tuple[np.ndarray, np.ndarray]:
-        n = self.parameters.horizon_steps
-        r = self.robot.parameters
         p = self.parameters
+        n = p.horizon_steps
         state_guess = np.zeros((self.state_dimension, n + 1), dtype=float)
         control_guess = np.zeros((self.control_dimension, n), dtype=float)
         state_guess[:, 0] = state
@@ -374,6 +265,16 @@ class NMPCController:
                 [np.cos(desired_heading), np.sin(desired_heading)],
                 dtype=float,
             )
+            tangent = np.array(
+                [np.cos(desired_heading), np.sin(desired_heading)],
+                dtype=float,
+            )
+            normal = np.array([-tangent[1], tangent[0]], dtype=float)
+            position_correction = preview.poses[step, 0:2] - current[0:2]
+            desired_world_velocity += (
+                1.2 * float(np.dot(position_correction, tangent)) * tangent
+                + 4.0 * float(np.dot(position_correction, normal)) * normal
+            )
             yaw = current[2]
             world_to_body = np.array(
                 [
@@ -384,86 +285,171 @@ class NMPCController:
             )
             desired_twist = np.r_[
                 world_to_body @ desired_world_velocity,
-                preview.yaw_rates[step],
+                preview.yaw_rates[step]
+                + 1.5
+                * np.arctan2(
+                    np.sin(desired_heading - yaw),
+                    np.cos(desired_heading - yaw),
+                ),
             ]
-
-            seed_pose = preview.poses[step + 1].copy()
-            seed_pose[2] = current[2]
-            clearance_q = self._clearance_seed_configuration(
-                seed_pose,
-                preferred_configuration=current[3:5],
-            )
-            maximum_change = r.articulation_rate_limit * p.dt
-            q_seed = current[3:5] + np.clip(
-                clearance_q - current[3:5],
-                -maximum_change,
-                maximum_change,
-            )
-            compatible = self._compatible_twist(q_seed, desired_twist)
-            control_guess[:, step] = self._clip_twist(compatible)
-            state_guess[:, step + 1] = np.asarray(
-                self.model.discrete_step(current, control_guess[:, step]),
+            desired_twist = self._clip_twist(desired_twist)
+            reference_pose = preview.poses[step + 1]
+            desired_control = desired_twist
+            desired_next = np.asarray(
+                self.model.discrete_step(current, desired_control),
                 dtype=float,
             ).reshape(self.state_dimension)
+            if (
+                self._joint_configuration_feasible(desired_next)
+                and
+                self._numeric_width_residual(desired_next, reference_pose)
+                <= -2.0 * p.smooth_epsilon
+            ):
+                selected_control = desired_control
+                selected_next = desired_next
+            else:
+                selected_control, selected_next = self._clearance_seed_control(
+                    current,
+                    desired_twist,
+                    reference_pose,
+                )
+            control_guess[:, step] = selected_control
+            state_guess[:, step + 1] = selected_next
         return state_guess, control_guess
 
-    def _clearance_seed_configuration(
+    def _numeric_width_residual(
         self,
-        pose: np.ndarray,
-        preferred_configuration: np.ndarray | None = None,
-    ) -> np.ndarray:
+        state: np.ndarray,
+        reference_pose: np.ndarray,
+    ) -> float:
+        heading = float(reference_pose[2])
+        path_normal = np.array([-np.sin(heading), np.cos(heading)], dtype=float)
+        required_width = float(
+            self.robot.centred_envelope_width_expression(
+                state,
+                reference_pose[0:2],
+                path_normal,
+                self.parameters.smooth_epsilon,
+            )
+        )
+        available_width = min(
+            float(self.corridor.full_width(vertex[0]))
+            for vertex in self.robot.footprint_vertices_world(state)
+        ) - 2.0 * self.parameters.clearance_margin
+        return required_width - available_width
+
+    def _joint_configuration_feasible(self, state: np.ndarray) -> bool:
+        q = np.asarray(state[3:5], dtype=float)
         r = self.robot.parameters
-        preferred = (
-            r.nominal_configuration
-            if preferred_configuration is None
-            else np.asarray(preferred_configuration, dtype=float).reshape(2)
+        tolerance = max(10.0 * self.parameters.ipopt_tolerance, 1.0e-6)
+        return bool(
+            np.all(q >= r.q_min - tolerance)
+            and np.all(q <= r.q_max + tolerance)
         )
-        state = np.r_[pose, preferred]
-        path_normal = np.array([-np.sin(pose[2]), np.cos(pose[2])], dtype=float)
-        available_width = (
-            float(self.corridor.full_width(float(pose[0])))
-            - 2.0 * self.parameters.clearance_margin
-        )
-        preferred_width = self.robot.envelope_width(state, path_normal)
-        if preferred_width <= available_width:
-            return preferred.copy()
 
-        cache_key = (
-            round(float(pose[2]), 4),
-            round(available_width, 4),
-            round(float(preferred[0]), 3),
-            round(float(preferred[1]), 3),
+    def _clearance_seed_control(
+        self,
+        state: np.ndarray,
+        desired_twist: np.ndarray,
+        reference_pose: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Find a feasible control seed without adding another constraint."""
+
+        r = self.robot.parameters
+        cache_key = tuple(
+            np.round(
+                np.r_[state, desired_twist, reference_pose[1:3]],
+                4,
+            )
         )
-        cached = self._clearance_seed_cache.get(cache_key)
+        cached = self._seed_control_cache.get(cache_key)
         if cached is not None:
-            return cached.copy()
+            return cached[0].copy(), cached[1].copy()
 
-        q1_values = np.linspace(r.q_min[0], r.q_max[0], 41)
-        q2_values = np.linspace(r.q_min[1], r.q_max[1], 41)
-        symmetry_reference = float(np.dot(r.symmetry_coupling, r.nominal_configuration))
-        best_q: np.ndarray | None = None
-        best_cost = float("inf")
-        narrowest_q = preferred.copy()
-        narrowest_width = preferred_width
-        for q1 in q1_values:
-            for q2 in q2_values:
-                q = np.array([q1, q2], dtype=float)
-                state[3:5] = q
-                width = self.robot.envelope_width(state, path_normal)
-                distance_cost = float(np.sum((q - preferred) ** 2))
-                symmetry_error = float(
-                    np.dot(r.symmetry_coupling, q) - symmetry_reference
+        fallback_control = np.zeros(3, dtype=float)
+        fallback_next = np.asarray(
+            self.model.discrete_step(state, fallback_control),
+            dtype=float,
+        ).reshape(self.state_dimension)
+        fallback_residual = self._numeric_width_residual(
+            fallback_next,
+            reference_pose,
+        )
+
+        def best_candidate(
+            candidates: list[np.ndarray],
+        ) -> tuple[np.ndarray | None, np.ndarray | None]:
+            nonlocal fallback_control, fallback_next, fallback_residual
+            best_control: np.ndarray | None = None
+            best_next: np.ndarray | None = None
+            best_cost = float("inf")
+            for q in candidates:
+                control = self._clip_twist(
+                    self._compatible_twist(q, desired_twist)
                 )
-                cost = distance_cost + 0.2 * symmetry_error**2
-                if width < narrowest_width:
-                    narrowest_width = width
-                    narrowest_q = q.copy()
-                if width <= available_width and cost < best_cost:
+                next_state = np.asarray(
+                    self.model.discrete_step(state, control),
+                    dtype=float,
+                ).reshape(self.state_dimension)
+                if not self._joint_configuration_feasible(next_state):
+                    continue
+                residual = self._numeric_width_residual(
+                    next_state,
+                    reference_pose,
+                )
+                if residual < fallback_residual:
+                    fallback_residual = residual
+                    fallback_control = control.copy()
+                    fallback_next = next_state.copy()
+                parallelism_error = float(self.robot.parallelism_residual(q))
+                tracking_error = next_state[0:2] - reference_pose[0:2]
+                cost = (
+                    parallelism_error**2
+                    + 0.2 * float(np.sum((control - desired_twist) ** 2))
+                    + 0.5 * float(np.sum(tracking_error**2))
+                    + 0.01
+                    * float(np.sum((next_state[3:5] - state[3:5]) ** 2))
+                )
+                if residual <= -2.0 * self.parameters.smooth_epsilon and cost < best_cost:
                     best_cost = cost
-                    best_q = q.copy()
+                    best_control = control.copy()
+                    best_next = next_state.copy()
+            return best_control, best_next
 
-        selected = narrowest_q if best_q is None else best_q
-        self._clearance_seed_cache[cache_key] = selected.copy()
+        # Search the preferred manifold first: q1-q2 = k*pi. It contains all
+        # parallel and antiparallel formations and is both faster and aligned
+        # with the only geometric cost in the simplified MPC.
+        parallel_candidates: list[np.ndarray] = []
+        for q1 in np.linspace(r.q_min[0], r.q_max[0], 41):
+            for turns in (-2, -1, 0, 1, 2):
+                q2 = q1 + turns * np.pi
+                if r.q_min[1] <= q2 <= r.q_max[1]:
+                    parallel_candidates.append(np.array([q1, q2], dtype=float))
+        for q2 in np.linspace(r.q_min[1], r.q_max[1], 41):
+            for turns in (-2, -1, 0, 1, 2):
+                q1 = q2 + turns * np.pi
+                if r.q_min[0] <= q1 <= r.q_max[0]:
+                    parallel_candidates.append(np.array([q1, q2], dtype=float))
+
+        q1_values = np.linspace(r.q_min[0], r.q_max[0], 11)
+        q2_values = np.linspace(r.q_min[1], r.q_max[1], 11)
+        coarse_candidates = [
+            np.array([q1, q2], dtype=float)
+            for q1 in q1_values
+            for q2 in q2_values
+        ]
+        best_control, best_next = best_candidate(
+            parallel_candidates + coarse_candidates
+        )
+
+        if best_control is not None and best_next is not None:
+            selected = (best_control, best_next)
+        else:
+            selected = (fallback_control, fallback_next)
+        self._seed_control_cache[cache_key] = (
+            selected[0].copy(),
+            selected[1].copy(),
+        )
         return selected
 
     def _apply_warm_start(
@@ -474,17 +460,29 @@ class NMPCController:
         if self._last_states is None or self._last_controls is None:
             state_guess, control_guess = self._initial_guess(state, preview)
         else:
-            state_guess = np.column_stack(
-                (self._last_states[:, 1:], self._last_states[:, -1])
-            )
             control_guess = np.column_stack(
                 (self._last_controls[:, 1:], self._last_controls[:, -1])
             )
-            state_guess[:, 0] = state
+            state_guess = self._rollout(state, control_guess)
         self.opti.set_initial(self.states, state_guess)
         self.opti.set_initial(self.controls, control_guess)
         self._current_state_guess = state_guess
         self._current_control_guess = control_guess
+
+    def _rollout(self, state: np.ndarray, controls: np.ndarray) -> np.ndarray:
+        """Evaluate a dynamically consistent multiple-shooting seed."""
+
+        states = np.zeros(
+            (self.state_dimension, controls.shape[1] + 1),
+            dtype=float,
+        )
+        states[:, 0] = np.asarray(state, dtype=float).reshape(self.state_dimension)
+        for step in range(controls.shape[1]):
+            states[:, step + 1] = np.asarray(
+                self.model.discrete_step(states[:, step], controls[:, step]),
+                dtype=float,
+            ).reshape(self.state_dimension)
+        return states
 
     def _evaluate_actuator_commands(
         self,
@@ -502,6 +500,85 @@ class NMPCController:
                 ).reshape(4)
                 for step in range(controls.shape[1])
             ]
+        )
+
+    def _guess_is_feasible(
+        self,
+        states: np.ndarray,
+        controls: np.ndarray,
+        preview: ReferencePreview,
+    ) -> bool:
+        """Check the four hard inequality families on a numeric rollout."""
+
+        p = self.parameters
+        r = self.robot.parameters
+        tolerance = max(10.0 * p.ipopt_tolerance, 1.0e-6)
+        if not np.all(np.isfinite(states)) or not np.all(np.isfinite(controls)):
+            return False
+        if np.any(states[3:5, :] < r.q_min[:, None] - tolerance):
+            return False
+        if np.any(states[3:5, :] > r.q_max[:, None] + tolerance):
+            return False
+        if np.any(np.linalg.norm(controls[0:2, :], axis=0) > p.body_speed_limit + tolerance):
+            return False
+        if np.any(np.abs(controls[2, :]) > p.body_yaw_rate_limit + tolerance):
+            return False
+        for step in range(states.shape[1]):
+            heading = preview.poses[step, 2]
+            normal = np.array([-np.sin(heading), np.cos(heading)], dtype=float)
+            robot_width = float(
+                self.robot.centred_envelope_width_expression(
+                    states[:, step],
+                    preview.poses[step, 0:2],
+                    normal,
+                    p.smooth_epsilon,
+                )
+            )
+            footprint_widths = [
+                float(self.corridor.full_width(vertex[0]))
+                for vertex in self.robot.footprint_vertices_world(states[:, step])
+            ]
+            available_width = (
+                min(footprint_widths)
+                - 2.0 * p.clearance_margin
+            )
+            buffer = 0.0 if step == 0 else 2.0 * p.smooth_epsilon
+            if robot_width > available_width - buffer + tolerance:
+                return False
+        return True
+
+    def _fallback_solution(
+        self,
+        preview: ReferencePreview,
+        states: np.ndarray,
+        controls: np.ndarray,
+        elapsed: float,
+        status: str,
+    ) -> NMPCSolution:
+        actuator_commands = self._evaluate_actuator_commands(states, controls)
+        self._last_states = states
+        self._last_controls = controls
+        objective = float(
+            self._objective_function(
+                states,
+                controls,
+                preview.poses.T,
+                preview.speeds.reshape((1, -1)),
+                preview.yaw_rates.reshape((1, -1)),
+            )
+        )
+        return NMPCSolution(
+            success=True,
+            control=controls[:, 0].copy(),
+            body_twist=controls[:, 0].copy(),
+            actuator_command=actuator_commands[:, 0].copy(),
+            predicted_states=states.T,
+            predicted_controls=controls.T,
+            predicted_twists=controls.T,
+            predicted_actuator_commands=actuator_commands.T,
+            objective=objective,
+            solve_time=elapsed,
+            status=f"{status} (feasible geometric fallback)",
         )
 
     def _successful_solution(
@@ -538,19 +615,8 @@ class NMPCController:
         self,
         state: np.ndarray,
         preview: ReferencePreview,
-        previous_control: np.ndarray,
-        previous_world_velocity: np.ndarray,
-        previous_track_speeds: np.ndarray | None = None,
-        previous_articulation_rates: np.ndarray | None = None,
     ) -> NMPCSolution:
-        self._set_parameters(
-            state,
-            preview,
-            previous_control,
-            previous_world_velocity,
-            previous_track_speeds,
-            previous_articulation_rates,
-        )
+        self._set_parameters(state, preview)
         self._apply_warm_start(state, preview)
         start = perf_counter()
         try:
@@ -559,13 +625,39 @@ class NMPCController:
                 solution,
                 perf_counter() - start,
             )
-        except RuntimeError:
-            # A shifted warm start can occasionally lead IPOPT into a poor
-            # local restoration path. Retry once from a geometry-aware fresh
-            # seed before deciding that the control interval has failed.
+        except RuntimeError as first_error:
+            elapsed = perf_counter() - start
+            first_status = str(
+                self.opti.stats().get("return_status", "Solve_Failed")
+            )
+            if self._guess_is_feasible(
+                self._current_state_guess,
+                self._current_control_guess,
+                preview,
+            ):
+                return self._fallback_solution(
+                    preview,
+                    self._current_state_guess,
+                    self._current_control_guess,
+                    elapsed,
+                    first_status,
+                )
+
+            # Build one geometry-aware seed. If it already satisfies every
+            # hard equation and inequality, applying it is safer and faster
+            # than asking IPOPT to repeat a failed restoration phase.
             self._last_states = None
             self._last_controls = None
             state_guess, control_guess = self._initial_guess(state, preview)
+            if self._guess_is_feasible(state_guess, control_guess, preview):
+                return self._fallback_solution(
+                    preview,
+                    state_guess,
+                    control_guess,
+                    elapsed,
+                    first_status,
+                )
+
             self.opti.set_initial(self.states, state_guess)
             self.opti.set_initial(self.controls, control_guess)
             self._current_state_guess = state_guess
@@ -579,6 +671,8 @@ class NMPCController:
                 )
             except RuntimeError as retry_error:
                 error_headline = str(retry_error).splitlines()[0]
+                if not error_headline:
+                    error_headline = str(first_error).splitlines()[0]
 
             elapsed = perf_counter() - start
             stats = self.opti.stats()
@@ -643,6 +737,14 @@ class NMPCController:
 
             state_guess = self._current_state_guess
             control_guess = self._current_control_guess
+            if self._guess_is_feasible(state_guess, control_guess, preview):
+                return self._fallback_solution(
+                    preview,
+                    state_guess,
+                    control_guess,
+                    elapsed,
+                    return_status,
+                )
             actuator_guess = self._evaluate_actuator_commands(
                 state_guess,
                 control_guess,

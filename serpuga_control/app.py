@@ -698,7 +698,7 @@ class SimulationApplication:
             self.metrics_var.set(
                 f"RMSE={summary['position_rmse_m']:.3f}m · "
                 f"clear={summary['minimum_clearance_m']:.3f}m · "
-                f"slip lat máx={summary['maximum_lateral_slip_mps']:.3f}m/s"
+                f"diag. slip lat={summary['maximum_lateral_slip_mps']:.3f}m/s"
             )
         else:
             self.status_var.set("Simulación finalizada sin alcanzar el objetivo")

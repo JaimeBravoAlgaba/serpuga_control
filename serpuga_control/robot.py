@@ -13,6 +13,7 @@ from .math_utils import (
     as_column,
     is_symbolic,
     rotation_2d,
+    smooth_abs,
     smooth_maximum,
     smooth_minimum,
 )
@@ -23,6 +24,13 @@ class RobotDescription:
     """Geometry and mass properties used by control and visualisation."""
 
     parameters: RobotParameters
+
+    @staticmethod
+    def parallelism_residual(q: Any) -> Any:
+        """Return zero for parallel or antiparallel track axes."""
+
+        difference = q[0] - q[1]
+        return ca.sin(difference) if is_symbolic(difference) else np.sin(difference)
 
     def track_corners_local(self) -> np.ndarray:
         half_length = 0.5 * self.parameters.track_length
@@ -161,6 +169,77 @@ class RobotDescription:
         upper = smooth_maximum(projections, epsilon)
         return lower, upper
 
+    def footprint_projection_bounds(
+        self,
+        state: Any,
+        normal_world: Any,
+        epsilon: float,
+    ) -> tuple[Any, Any]:
+        """Project the complete robot footprint on an arbitrary direction."""
+
+        symbolic = is_symbolic(state[0]) or is_symbolic(normal_world[0])
+        projections = []
+        for vertex in self.footprint_vertices_world(state):
+            if symbolic:
+                projections.append(ca.dot(normal_world, vertex))
+            else:
+                projections.append(float(np.dot(normal_world, vertex)))
+        if symbolic:
+            return (
+                smooth_minimum(projections, epsilon),
+                smooth_maximum(projections, epsilon),
+            )
+        return min(projections), max(projections)
+
+    def envelope_width_expression(
+        self,
+        state: Any,
+        normal_world: Any,
+        epsilon: float,
+    ) -> Any:
+        """Return the full formation width along ``normal_world``.
+
+        The symbolic branch uses differentiable extrema so it can be used as
+        the single clearance inequality in the NMPC.
+        """
+
+        lower, upper = self.footprint_projection_bounds(
+            state,
+            normal_world,
+            epsilon,
+        )
+        return upper - lower
+
+    def centred_envelope_width_expression(
+        self,
+        state: Any,
+        centre_world: Any,
+        normal_world: Any,
+        epsilon: float,
+    ) -> Any:
+        """Width required around a prescribed corridor centreline.
+
+        Unlike the minimum span, this quantity also accounts for lateral
+        offset of an asymmetric formation: it is twice the furthest footprint
+        projection from the planned centreline.
+        """
+
+        symbolic = is_symbolic(state[0]) or is_symbolic(normal_world[0])
+        radii = []
+        for vertex in self.footprint_vertices_world(state):
+            if symbolic:
+                offset = ca.dot(normal_world, vertex - centre_world)
+                radii.append(smooth_abs(offset, epsilon))
+            else:
+                offset = float(np.dot(normal_world, vertex - centre_world))
+                radii.append(abs(offset))
+        radius = (
+            smooth_maximum(radii, epsilon)
+            if symbolic
+            else max(radii)
+        )
+        return 2.0 * radius
+
     def lateral_stability_margins(
         self,
         state: Any,
@@ -188,8 +267,10 @@ class RobotDescription:
         return lower_margin, upper_margin, margin
 
     def envelope_width(self, state: np.ndarray, normal_world: np.ndarray) -> float:
-        projections = [
-            float(np.dot(normal_world, vertex))
-            for vertex in self.footprint_vertices_world(state)
-        ]
-        return max(projections) - min(projections)
+        return float(
+            self.envelope_width_expression(
+                state,
+                normal_world,
+                epsilon=0.0,
+            )
+        )

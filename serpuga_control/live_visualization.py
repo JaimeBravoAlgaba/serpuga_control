@@ -444,7 +444,7 @@ class LiveSimulationPlayer:
             [], [], color=COLOURS["violet"], linewidth=1.6, label="Slip oruga 2"
         )
         (self.stability_line,) = self.diagnostics.plot(
-            [], [], color=COLOURS["amber"], linewidth=2.0, label="Margen ZMP"
+            [], [], color=COLOURS["amber"], linewidth=2.0, label="Margen soporte"
         )
         (self.clearance_line,) = self.diagnostics.plot(
             [],
@@ -455,18 +455,18 @@ class LiveSimulationPlayer:
             label="Clearance",
         )
         self.diagnostics.axhline(
-            self.mpc_parameters.minimum_stability_margin,
+            0.0,
             color=COLOURS["red"],
             linewidth=1.0,
             linestyle=":",
-            label="Margen mínimo",
+            label="Límite del soporte",
         )
         diagnostic_values = np.concatenate(
             (
                 self._slip_magnitude.ravel(),
                 self.log.stability_margins,
                 self.log.clearances,
-                np.array([self.mpc_parameters.minimum_stability_margin]),
+                np.array([0.0]),
             )
         )
         diagnostic_maximum = max(0.08, float(np.max(diagnostic_values)) * 1.15)
@@ -475,7 +475,7 @@ class LiveSimulationPlayer:
         )
         self.diagnostics.set_xlim(0.0, max(self.dt, self._state_times[-1]))
         self.diagnostics.set_title(
-            "Deslizamiento y seguridad", loc="left", color=COLOURS["ink"]
+            "Diagnósticos (no restringidos)", loc="left", color=COLOURS["ink"]
         )
         self.diagnostics.set_xlabel("Tiempo [s]", color=COLOURS["muted"])
         self.diagnostics.set_ylabel("m o m/s", color=COLOURS["muted"])
@@ -689,7 +689,7 @@ class LiveSimulationPlayer:
             f"ancho   {self.log.robot_widths[telemetry_index]: .3f} / "
             f"{self.log.corridor_widths[telemetry_index]:.3f} m\n"
             f"slip    {slip_values[0]: .3f}, {slip_values[1]:.3f} m/s\n"
-            f"ZMP     {self.log.stability_margins[telemetry_index]: .3f} m   "
+            f"soporte {self.log.stability_margins[telemetry_index]: .3f} m   "
             f"clear {self.log.clearances[telemetry_index]:.3f} m"
         )
 

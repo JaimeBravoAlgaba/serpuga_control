@@ -160,7 +160,7 @@ def plot_simulation_dashboard(
     figure.text(
         0.055,
         0.918,
-        "Seguimiento cinemático · mínimo deslizamiento · adaptación al corredor · margen ZMP",
+        "Seguimiento cinemático · paralelismo · adaptación al ancho libre",
         ha="left",
         fontsize=10.5,
         color=COLOURS["muted"],
@@ -393,7 +393,7 @@ def plot_simulation_dashboard(
         log.stability_margins,
         color=COLOURS["amber"],
         linewidth=2.0,
-        label="Margen ZMP",
+        label="Margen soporte",
     )
     diagnostics.plot(
         log.times,
@@ -404,13 +404,15 @@ def plot_simulation_dashboard(
         label="Clearance",
     )
     diagnostics.axhline(
-        mpc_parameters.minimum_stability_margin,
+        0.0,
         color=COLOURS["red"],
         linewidth=1.0,
         linestyle=":",
-        label="Margen mínimo",
+        label="Límite del soporte",
     )
-    diagnostics.set_title("Deslizamiento y seguridad", loc="left", color=COLOURS["ink"])
+    diagnostics.set_title(
+        "Diagnósticos (no restringidos)", loc="left", color=COLOURS["ink"]
+    )
     diagnostics.set_xlabel("Tiempo [s]", color=COLOURS["muted"])
     diagnostics.set_ylabel("Magnitud [m o m/s]", color=COLOURS["muted"])
     _style_axis(diagnostics)
@@ -430,7 +432,7 @@ def plot_simulation_dashboard(
         0.947,
         (
             f"clearance mín. {summary['minimum_clearance_m']:.3f} m   ·   "
-            f"estabilidad mín. {summary['minimum_stability_margin_m']:.3f} m   ·   "
+            f"soporte mín. {summary['minimum_support_margin_m']:.3f} m   ·   "
             f"solve medio {summary['mean_solve_time_s']:.3f} s"
         ),
         ha="right",

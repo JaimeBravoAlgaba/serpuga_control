@@ -22,14 +22,6 @@ robot:
   q2_max_deg: 70.0
   q1_nominal_deg: 0.0
   q2_nominal_deg: 0.0
-  symmetry_1: 1.0
-  symmetry_2: 1.0
-  track_speed_limit_mps: 1.10
-  articulation_rate_limit_degps: 75.0
-  track_acceleration_limit_mps2: 2.5
-  articulation_acceleration_limit_degps2: 210.0
-  longitudinal_slip_weight: 1.0
-  lateral_slip_weight: 6.0
 scenario:
   open_width_m: 4.0
   gap_width_m: 4.0
@@ -55,27 +47,13 @@ mpc:
   heading_weight: 24.0
   velocity_weight: 90.0
   yaw_rate_weight: 35.0
-  slip_weight: 4.0
-  scrub_weight: 0.08
-  articulation_rate_weight: 0.08
-  track_effort_weight: 0.015
-  input_rate_weight: 0.12
-  symmetry_weight: 10.0
-  track_alignment_weight: 0.5
-  stability_weight: 0.35
-  nominal_configuration_weight: 0.018
+  parallelism_weight: 30.0
   terminal_position_weight: 14.0
   terminal_heading_weight: 5.0
   clearance_margin_m: 0.01
-  minimum_stability_margin_m: 0.035
-  target_stability_margin_m: 0.16
-  maximum_heading_error_deg: 5.0
   body_speed_limit_mps: 0.65
   body_yaw_rate_limit_rps: 1.2
-  maximum_lateral_slip_mps: 0.10
-  use_zmp: true
-  gravity_mps2: 9.81
   regularisation: 1.0e-7
-  smooth_epsilon: 1.0e-5
-  ipopt_max_iterations: 160
+  smooth_epsilon: 1.0e-3
+  ipopt_max_iterations: 20
   ipopt_tolerance: 1.0e-5

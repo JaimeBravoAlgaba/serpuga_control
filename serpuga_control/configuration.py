@@ -136,55 +136,6 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
     _field("Robot", "Articulaciones", "robot", "q2_max_deg", "q2 máximo", "deg"),
     _field("Robot", "Articulaciones", "robot", "q1_nominal_deg", "q1 nominal", "deg"),
     _field("Robot", "Articulaciones", "robot", "q2_nominal_deg", "q2 nominal", "deg"),
-    _field("Robot", "Articulaciones", "robot", "symmetry_1", "Acoplamiento q1"),
-    _field("Robot", "Articulaciones", "robot", "symmetry_2", "Acoplamiento q2"),
-    # Robot · actuators and contact slip
-    _field(
-        "Robot",
-        "Actuadores",
-        "robot",
-        "track_speed_limit_mps",
-        "Velocidad máxima de banda",
-        "m/s",
-    ),
-    _field(
-        "Robot",
-        "Actuadores",
-        "robot",
-        "articulation_rate_limit_degps",
-        "Velocidad articular máxima",
-        "deg/s",
-    ),
-    _field(
-        "Robot",
-        "Actuadores",
-        "robot",
-        "track_acceleration_limit_mps2",
-        "Aceleración máxima de banda",
-        "m/s²",
-    ),
-    _field(
-        "Robot",
-        "Actuadores",
-        "robot",
-        "articulation_acceleration_limit_degps2",
-        "Aceleración articular máxima",
-        "deg/s²",
-    ),
-    _field(
-        "Robot",
-        "Deslizamiento de contacto",
-        "robot",
-        "longitudinal_slip_weight",
-        "Peso longitudinal",
-    ),
-    _field(
-        "Robot",
-        "Deslizamiento de contacto",
-        "robot",
-        "lateral_slip_weight",
-        "Peso lateral",
-    ),
     # Scenario
     _field(
         "Escenario",
@@ -308,49 +259,11 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
         "Orientación terminal",
     ),
     _field(
-        "MPC", "Costes de contacto y actuación", "mpc", "slip_weight", "Deslizamiento"
-    ),
-    _field("MPC", "Costes de contacto y actuación", "mpc", "scrub_weight", "Scrubbing"),
-    _field(
         "MPC",
-        "Costes de contacto y actuación",
+        "Forma del robot",
         "mpc",
-        "articulation_rate_weight",
-        "Velocidad articular",
-    ),
-    _field(
-        "MPC",
-        "Costes de contacto y actuación",
-        "mpc",
-        "track_effort_weight",
-        "Esfuerzo de bandas",
-    ),
-    _field(
-        "MPC",
-        "Costes de contacto y actuación",
-        "mpc",
-        "input_rate_weight",
-        "Variación de comandos",
-    ),
-    _field(
-        "MPC", "Costes de forma y estabilidad", "mpc", "symmetry_weight", "Simetría"
-    ),
-    _field(
-        "MPC",
-        "Costes de forma y estabilidad",
-        "mpc",
-        "track_alignment_weight",
-        "Alineamiento de orugas",
-    ),
-    _field(
-        "MPC", "Costes de forma y estabilidad", "mpc", "stability_weight", "Estabilidad"
-    ),
-    _field(
-        "MPC",
-        "Costes de forma y estabilidad",
-        "mpc",
-        "nominal_configuration_weight",
-        "Configuración nominal",
+        "parallelism_weight",
+        "Paralelismo entre orugas",
     ),
     # MPC · constraints
     _field(
@@ -360,30 +273,6 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
         "clearance_margin_m",
         "Margen contra paredes",
         "m",
-    ),
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "minimum_stability_margin_m",
-        "Margen mínimo de estabilidad",
-        "m",
-    ),
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "target_stability_margin_m",
-        "Margen objetivo de estabilidad",
-        "m",
-    ),
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "maximum_heading_error_deg",
-        "Umbral blando de orientación",
-        "deg",
     ),
     _field(
         "MPC",
@@ -401,24 +290,7 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
         "Yaw rate máximo del cuerpo",
         "rad/s",
     ),
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "maximum_lateral_slip_mps",
-        "Slip lateral máximo",
-        "m/s",
-    ),
-    # MPC · model and solver
-    _field(
-        "MPC",
-        "Modelo de estabilidad",
-        "mpc",
-        "use_zmp",
-        "Usar ZMP aproximado",
-        kind="bool",
-    ),
-    _field("MPC", "Modelo de estabilidad", "mpc", "gravity_mps2", "Gravedad", "m/s²"),
+    # MPC · numerical model and solver
     _field("MPC", "Solver", "mpc", "regularisation", "Regularización"),
     _field("MPC", "Solver", "mpc", "smooth_epsilon", "Épsilon de suavizado"),
     _field(
@@ -455,10 +327,6 @@ class ApplicationConfiguration:
             "robot.body_mass": r.body_mass,
             "robot.track_mass": r.track_mass,
             "robot.com_height": r.com_height,
-            "robot.track_speed_limit": r.track_speed_limit,
-            "robot.articulation_rate_limit": r.articulation_rate_limit,
-            "robot.track_acceleration_limit": r.track_acceleration_limit,
-            "robot.articulation_acceleration_limit": r.articulation_acceleration_limit,
             "scenario.open_width": c.open_width,
             "scenario.gap_width": c.gap_width,
             "scenario.transition_length": c.transition_length,
@@ -466,8 +334,6 @@ class ApplicationConfiguration:
             "mpc.dt": p.dt,
             "mpc.body_speed_limit": p.body_speed_limit,
             "mpc.body_yaw_rate_limit": p.body_yaw_rate_limit,
-            "mpc.gravity": p.gravity,
-            "mpc.maximum_heading_error": p.maximum_heading_error,
             "mpc.regularisation": p.regularisation,
             "mpc.smooth_epsilon": p.smooth_epsilon,
             "mpc.ipopt_tolerance": p.ipopt_tolerance,
@@ -485,16 +351,8 @@ class ApplicationConfiguration:
             raise ConfigurationError(
                 "MPC horizon and solver iterations must be positive"
             )
-        if p.clearance_margin < 0.0 or p.minimum_stability_margin < 0.0:
-            raise ConfigurationError(
-                "Clearance and stability margins cannot be negative"
-            )
-        if p.maximum_lateral_slip < 0.0:
-            raise ConfigurationError("Maximum lateral slip cannot be negative")
-        if p.target_stability_margin < p.minimum_stability_margin:
-            raise ConfigurationError(
-                "Target stability margin must be at least the minimum margin"
-            )
+        if p.clearance_margin < 0.0:
+            raise ConfigurationError("Clearance margin cannot be negative")
         if c.gap_width <= 2.0 * p.clearance_margin:
             raise ConfigurationError(
                 "Gap width must exceed twice the configured wall clearance"
@@ -508,15 +366,7 @@ class ApplicationConfiguration:
             "heading_weight",
             "velocity_weight",
             "yaw_rate_weight",
-            "slip_weight",
-            "scrub_weight",
-            "articulation_rate_weight",
-            "track_effort_weight",
-            "input_rate_weight",
-            "symmetry_weight",
-            "track_alignment_weight",
-            "stability_weight",
-            "nominal_configuration_weight",
+            "parallelism_weight",
             "terminal_position_weight",
             "terminal_heading_weight",
         )
@@ -620,20 +470,6 @@ class ApplicationConfiguration:
                     ]
                 )
             ),
-            symmetry_coupling=np.array(
-                [number("robot", "symmetry_1"), number("robot", "symmetry_2")],
-                dtype=float,
-            ),
-            track_speed_limit=number("robot", "track_speed_limit_mps"),
-            articulation_rate_limit=float(
-                deg(number("robot", "articulation_rate_limit_degps"))
-            ),
-            track_acceleration_limit=number("robot", "track_acceleration_limit_mps2"),
-            articulation_acceleration_limit=float(
-                deg(number("robot", "articulation_acceleration_limit_degps2"))
-            ),
-            longitudinal_slip_weight=number("robot", "longitudinal_slip_weight"),
-            lateral_slip_weight=number("robot", "lateral_slip_weight"),
         )
 
         corridor = StraightGapCorridor(
@@ -646,6 +482,13 @@ class ApplicationConfiguration:
         )
 
         p = lambda key: number("mpc", key)
+        parallelism_weight = (
+            p("parallelism_weight")
+            if "parallelism_weight" in sections["mpc"]
+            else p("track_alignment_weight")
+            if "track_alignment_weight" in sections["mpc"]
+            else MPCParameters().parallelism_weight
+        )
         mpc = MPCParameters(
             dt=p("sample_time_s"),
             horizon_steps=integer("mpc", "horizon_steps"),
@@ -653,26 +496,12 @@ class ApplicationConfiguration:
             heading_weight=p("heading_weight"),
             velocity_weight=p("velocity_weight"),
             yaw_rate_weight=p("yaw_rate_weight"),
-            slip_weight=p("slip_weight"),
-            scrub_weight=p("scrub_weight"),
-            articulation_rate_weight=p("articulation_rate_weight"),
-            track_effort_weight=p("track_effort_weight"),
-            input_rate_weight=p("input_rate_weight"),
-            symmetry_weight=p("symmetry_weight"),
-            track_alignment_weight=p("track_alignment_weight"),
-            stability_weight=p("stability_weight"),
-            nominal_configuration_weight=p("nominal_configuration_weight"),
+            parallelism_weight=parallelism_weight,
             terminal_position_weight=p("terminal_position_weight"),
             terminal_heading_weight=p("terminal_heading_weight"),
             clearance_margin=p("clearance_margin_m"),
-            minimum_stability_margin=p("minimum_stability_margin_m"),
-            target_stability_margin=p("target_stability_margin_m"),
-            maximum_heading_error=float(deg(p("maximum_heading_error_deg"))),
             body_speed_limit=p("body_speed_limit_mps"),
             body_yaw_rate_limit=p("body_yaw_rate_limit_rps"),
-            maximum_lateral_slip=p("maximum_lateral_slip_mps"),
-            use_zmp=boolean("mpc", "use_zmp"),
-            gravity=p("gravity_mps2"),
             regularisation=p("regularisation"),
             smooth_epsilon=p("smooth_epsilon"),
             ipopt_max_iterations=integer("mpc", "ipopt_max_iterations"),
@@ -732,18 +561,6 @@ class ApplicationConfiguration:
                 "q2_max_deg": float(degrees(r.q_max[1])),
                 "q1_nominal_deg": float(degrees(r.nominal_configuration[0])),
                 "q2_nominal_deg": float(degrees(r.nominal_configuration[1])),
-                "symmetry_1": float(r.symmetry_coupling[0]),
-                "symmetry_2": float(r.symmetry_coupling[1]),
-                "track_speed_limit_mps": float(r.track_speed_limit),
-                "articulation_rate_limit_degps": float(
-                    degrees(r.articulation_rate_limit)
-                ),
-                "track_acceleration_limit_mps2": float(r.track_acceleration_limit),
-                "articulation_acceleration_limit_degps2": float(
-                    degrees(r.articulation_acceleration_limit)
-                ),
-                "longitudinal_slip_weight": float(r.longitudinal_slip_weight),
-                "lateral_slip_weight": float(r.lateral_slip_weight),
             },
             "scenario": {
                 "open_width_m": float(c.open_width),
@@ -772,26 +589,12 @@ class ApplicationConfiguration:
                 "heading_weight": float(p.heading_weight),
                 "velocity_weight": float(p.velocity_weight),
                 "yaw_rate_weight": float(p.yaw_rate_weight),
-                "slip_weight": float(p.slip_weight),
-                "scrub_weight": float(p.scrub_weight),
-                "articulation_rate_weight": float(p.articulation_rate_weight),
-                "track_effort_weight": float(p.track_effort_weight),
-                "input_rate_weight": float(p.input_rate_weight),
-                "symmetry_weight": float(p.symmetry_weight),
-                "track_alignment_weight": float(p.track_alignment_weight),
-                "stability_weight": float(p.stability_weight),
-                "nominal_configuration_weight": float(p.nominal_configuration_weight),
+                "parallelism_weight": float(p.parallelism_weight),
                 "terminal_position_weight": float(p.terminal_position_weight),
                 "terminal_heading_weight": float(p.terminal_heading_weight),
                 "clearance_margin_m": float(p.clearance_margin),
-                "minimum_stability_margin_m": float(p.minimum_stability_margin),
-                "target_stability_margin_m": float(p.target_stability_margin),
-                "maximum_heading_error_deg": float(degrees(p.maximum_heading_error)),
                 "body_speed_limit_mps": float(p.body_speed_limit),
                 "body_yaw_rate_limit_rps": float(p.body_yaw_rate_limit),
-                "maximum_lateral_slip_mps": float(p.maximum_lateral_slip),
-                "use_zmp": bool(p.use_zmp),
-                "gravity_mps2": float(p.gravity),
                 "regularisation": float(p.regularisation),
                 "smooth_epsilon": float(p.smooth_epsilon),
                 "ipopt_max_iterations": int(p.ipopt_max_iterations),

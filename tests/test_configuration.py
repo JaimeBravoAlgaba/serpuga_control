@@ -31,6 +31,9 @@ def test_form_values_round_trip_and_allow_gap_editing() -> None:
         restored.simulation.initial_state,
         configuration.simulation.initial_state,
     )
+    assert "mpc.parallelism_weight" in values
+    assert "mpc.slip_weight" not in values
+    assert "mpc.minimum_stability_margin_m" not in values
 
 
 def test_legacy_gap_pose_fields_are_ignored() -> None:
@@ -46,6 +49,17 @@ def test_legacy_gap_pose_fields_are_ignored() -> None:
     assert "q1_narrow_deg" not in saved
     assert "q2_narrow_deg" not in saved
     assert "narrow_body_yaw_deg" not in saved
+
+
+def test_legacy_mpc_profile_maps_alignment_weight_to_parallelism() -> None:
+    configuration = ConfigurationStore(BUILTIN_CONFIGS).load("default")
+    mapping = configuration.to_mapping()
+    mapping["mpc"].pop("parallelism_weight")
+    mapping["mpc"]["track_alignment_weight"] = 17.0
+
+    restored = configuration.from_mapping(mapping)
+
+    assert restored.mpc.parallelism_weight == 17.0
 
 
 def test_profile_can_be_saved_and_loaded(tmp_path) -> None:

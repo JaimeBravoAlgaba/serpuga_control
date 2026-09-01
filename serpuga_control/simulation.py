@@ -73,7 +73,7 @@ class SimulationLog:
             ),
             "maximum_lateral_slip_mps": float(np.max(np.abs(self.slips[:, :, 1]))),
             "minimum_clearance_m": float(np.min(self.clearances)),
-            "minimum_stability_margin_m": float(np.min(self.stability_margins)),
+            "minimum_support_margin_m": float(np.min(self.stability_margins)),
             "maximum_fold_deg": float(
                 np.max(np.abs(np.rad2deg(self.states[:, 3:5] - self.states[0, 3:5])))
             ),
@@ -122,10 +122,6 @@ class ClosedLoopSession:
         self.dt = float(mpc_parameters.dt)
         self.maximum_steps = int(np.ceil(simulation_parameters.duration / self.dt))
         self.state = simulation_parameters.initial_state.astype(float).copy()
-        self.previous_control = np.zeros(3, dtype=float)
-        self.previous_track_speeds = np.zeros(2, dtype=float)
-        self.previous_articulation_rates = np.zeros(2, dtype=float)
-        self.previous_world_velocity = np.zeros(2, dtype=float)
 
         self.states: list[np.ndarray] = [self.state.copy()]
         self.times: list[float] = []
@@ -241,14 +237,7 @@ class ClosedLoopSession:
             solution = self._manual_solution(command)
             control_mode = "manual"
         else:
-            solution = self.controller.solve(
-                self.state,
-                preview,
-                self.previous_control,
-                self.previous_world_velocity,
-                self.previous_track_speeds,
-                self.previous_articulation_rates,
-            )
+            solution = self.controller.solve(self.state, preview)
             control_mode = "mpc"
         if not solution.success:
             self.finished = True
@@ -267,18 +256,9 @@ class ClosedLoopSession:
             self.model.slip_components(self.state[3:5], control),
             dtype=float,
         )
-        world_acceleration = (world_velocity - self.previous_world_velocity) / self.dt
         centre_of_mass = np.asarray(
             self.robot.centre_of_mass_world(self.state), dtype=float
         )
-        evaluation_point = centre_of_mass
-        if self.mpc_parameters.use_zmp:
-            evaluation_point = (
-                centre_of_mass
-                - self.robot.parameters.com_height
-                / self.mpc_parameters.gravity
-                * world_acceleration
-            )
         path_normal = np.array(
             [-np.sin(preview.poses[0, 2]), np.cos(preview.poses[0, 2])],
             dtype=float,
@@ -286,7 +266,7 @@ class ClosedLoopSession:
         _, _, stability_margin = self.robot.lateral_stability_margins(
             self.state,
             path_normal,
-            evaluation_point,
+            centre_of_mass,
             self.mpc_parameters.smooth_epsilon,
         )
 
@@ -304,7 +284,7 @@ class ClosedLoopSession:
             _minimum_clearance(self.state, self.robot, self.corridor)
         )
         self.robot_widths.append(
-            self.robot.envelope_width(self.state, np.array([0.0, 1.0]))
+            self.robot.envelope_width(self.state, path_normal)
         )
         self.corridor_widths.append(float(self.corridor.full_width(self.state[0])))
         self.solve_times.append(solution.solve_time)
@@ -316,13 +296,8 @@ class ClosedLoopSession:
         next_state = np.asarray(
             self.model.discrete_step(self.state, control), dtype=float
         ).reshape(5)
-        articulation_rates = (next_state[3:5] - self.state[3:5]) / self.dt
         self.states.append(next_state.copy())
         self.state = next_state
-        self.previous_control = control.copy()
-        self.previous_track_speeds = actuator_command[2:4].copy()
-        self.previous_articulation_rates = articulation_rates
-        self.previous_world_velocity = world_velocity.copy()
 
         reached_stop = (
             self.simulation_parameters.stop_position is not None

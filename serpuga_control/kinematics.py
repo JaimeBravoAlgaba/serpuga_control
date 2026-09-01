@@ -45,8 +45,8 @@ class KinematicModel:
 
     The control is always ``[v_x, v_y, omega]`` expressed in the bar/body
     frame. Track angles and signed belt speeds are generated analytically.
-    The state remains ``[X, Y, psi, q1, q2]`` so geometry, steering-rate
-    limits and transient contact slip can still be represented.
+    The state remains ``[X, Y, psi, q1, q2]`` so the changing geometry and
+    diagnostic contact slip can still be represented.
     """
 
     robot: RobotDescription
@@ -131,30 +131,20 @@ class KinematicModel:
             pivot = self.robot.parameters.pivot_positions[index]
             if symbolic:
                 local_velocity = twist[0:2] + twist[2] * (J2_CASADI @ as_column(pivot))
-                candidate = self._nearest_axis_angle(
+                angle = self._nearest_axis_angle(
                     local_velocity,
                     q_reference[index],
                     epsilon_squared,
-                )
-                speed_squared = ca.sumsqr(local_velocity)
-                angle = ca.if_else(
-                    speed_squared > epsilon_squared,
-                    candidate,
-                    q_reference[index],
                 )
                 longitudinal = ca.vertcat(ca.cos(angle), ca.sin(angle))
                 speed = ca.dot(longitudinal, local_velocity)
             else:
                 local_velocity = twist[0:2] + twist[2] * (J2_NUMPY @ pivot)
-                speed_squared = float(np.dot(local_velocity, local_velocity))
-                if speed_squared > epsilon_squared:
-                    angle = self._nearest_axis_angle(
-                        local_velocity,
-                        float(q_reference[index]),
-                        epsilon_squared,
-                    )
-                else:
-                    angle = float(q_reference[index])
+                angle = self._nearest_axis_angle(
+                    local_velocity,
+                    float(q_reference[index]),
+                    epsilon_squared,
+                )
                 longitudinal = np.array([np.cos(angle), np.sin(angle)], dtype=float)
                 speed = float(np.dot(longitudinal, local_velocity))
             angles.append(angle)
@@ -305,9 +295,9 @@ class KinematicModel:
     def discrete_step(self, state: Any, control: Any) -> Any:
         """Integrate the bar pose with ZOH and apply the analytic IK target.
 
-        The articulation change over the interval is constrained by the NMPC.
         Assigning the target at the sample boundary is an ideal position-servo
-        model; the associated average rate and contact slip remain explicit.
+        model; the associated average rate and contact slip remain available
+        as diagnostics but are not MPC constraints.
         """
 
         dt = self.mpc_parameters.dt
