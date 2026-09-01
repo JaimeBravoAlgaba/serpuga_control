@@ -14,10 +14,11 @@ adapta la envolvente completa del robot al ancho libre de un corredor.
 - velocidades de banda firmadas, permitiendo avance y retroceso por oruga;
 - NMPC de disparo múltiple implementado con CasADi/IPOPT;
 - coste de paralelismo invariante ante una diferencia de 180 grados;
+- límite duro configurable sobre la velocidad de las articulaciones de las orugas;
 - una única desigualdad geométrica `ancho_robot <= ancho_libre - 2*margen`;
 - corredor sintético intercambiable por el futuro estimador láser;
 - deslizamiento, soporte y holgura conservados como diagnósticos no restringidos;
-- reserva geométrica comprobada cuando IPOPT agota su presupuesto online;
+- reserva factible comprobada cuando IPOPT agota su presupuesto online;
 - aplicación gráfica con configuración completa y perfiles YAML;
 - simulación online: cada paso MPC se resuelve, aplica y dibuja inmediatamente;
 - teleoperación manual en vivo mediante `vx`, `vy` y `omega`, con las consignas
@@ -81,7 +82,8 @@ inicializados. A la derecha aparecen cuatro pestañas:
 - **Robot**: geometría, masas y límites de posición de las articulaciones;
 - **Escenario**: anchuras, posición y transición del hueco;
 - **Simulación**: estado inicial, duración y referencias constantes `v` y `ω`;
-- **MPC**: horizonte, seguimiento, paralelismo, anchura y opciones de IPOPT.
+- **MPC**: horizonte, seguimiento, paralelismo, límites de velocidad, anchura y
+  opciones de IPOPT.
 
 La simulación corre en tiempo real desde que se carga un perfil. El panel de
 **Teleoperación** permite activar **Modo manual**, que deja de resolver el MPC y
@@ -102,6 +104,11 @@ Los perfiles se guardan en [`configs/`](configs/). El desplegable superior lista
 automáticamente todos los archivos `.yaml` y `.yml` de esa carpeta. **Cargar**
 rellena todas las pestañas y **Guardar como…** crea o actualiza un perfil con los
 valores actuales.
+
+El parámetro `mpc.articulation_rate_limit_rps` fija la velocidad articular
+máxima admitida por el NMPC. Los perfiles incluidos usan `1.5 rad/s` como valor
+inicial ilustrativo y debe ajustarse a los actuadores reales antes de pasar a
+hardware.
 
 Se incluyen tres ejemplos editables:
 
@@ -149,8 +156,10 @@ del solver y suele tardar más que los ciclos siguientes.
 
 Este repositorio valida la arquitectura y la optimización cinemática en 2D. No
 es todavía un controlador listo para hardware: el *twist* es la orden
-cinemática de alto nivel y se supone un servo articular ideal por periodo. La
-inversa es exacta en los pivotes puntuales y se supone un servo articular ideal.
-Los límites de banda y articulación, el deslizamiento y la estabilidad dinámica
-no se imponen en esta versión deliberadamente mínima. El siguiente nivel deberá
-validar esos efectos antes de llevar el controlador a hardware.
+cinemática de alto nivel y se mantiene un servo articular ideal dentro de cada
+periodo, aunque el NMPC ya limita la velocidad articular media necesaria para
+alcanzar la consigna de la inversa. La inversa es exacta en los pivotes
+puntuales. Los límites de velocidad de banda, aceleración/par articular, el
+deslizamiento y la estabilidad dinámica no se imponen en esta versión. El
+siguiente nivel deberá validar esos efectos antes de llevar el controlador a
+hardware.
