@@ -102,17 +102,25 @@ La pose de la barra se integra directamente desde el control:
 \]
 
 La implementación usa RK4 con control constante durante cada periodo. Para las
-articulaciones se adopta inicialmente un servo ideal de posición: al final del
-periodo se alcanza \(q_i^*\). La velocidad articular media requerida queda
-explícita:
+articulaciones se mantiene un servo ideal de posición dentro de cada periodo:
+al final del intervalo se alcanza \(q_i^*\). La velocidad articular media
+requerida es
 
 \[
 \dot q_i=\frac{q_i^*-q_i}{\Delta t}.
 \]
 
-Esta velocidad queda disponible como diagnóstico, pero no se limita en la
-formulación simplificada. La aproximación permite separar la cinemática inversa
-del futuro modelo dinámico de los actuadores.
+A diferencia de la primera formulación mínima, esta velocidad sí está limitada
+como restricción dura del NMPC:
+
+\[
+-\dot q_{max}\leq \dot q_i\leq \dot q_{max}.
+\]
+
+La inversa selecciona el eje equivalente más próximo al ángulo actual, por lo
+que la diferencia \(q_i^*-q_i\) se evalúa sobre la rama angular local y no
+requiere introducir saltos artificiales de \(2\pi\) en el grafo de CasADi. El
+modelo sigue sin incluir aceleración ni dinámica interna del servo.
 
 ## Deslizamiento de una huella finita
 
@@ -172,8 +180,8 @@ como si sus direcciones difieren \(180^\circ\). Por tanto mide el paralelismo
 de sus ejes físicos, no el signo de las velocidades de banda. Se añaden los
 términos terminales de posición y orientación de la misma referencia.
 
-La formulación conserva solo cuatro familias de desigualdades. La condición
-inicial y la dinámica se imponen mediante disparo múltiple:
+La formulación conserva cinco familias de desigualdades. La condición inicial
+y la dinámica se imponen mediante disparo múltiple:
 
 \[
 x_0=x_{medido},\qquad x_{k+1}=f(x_k,u_k),
@@ -182,6 +190,10 @@ x_0=x_{medido},\qquad x_{k+1}=f(x_k,u_k),
 \[
 q_{min}\le q_k\le q_{max},
 \qquad
+|\dot q_{i,k}|\le \dot q_{max},
+\]
+
+\[
 \|[v_x,v_y]^T\|_2\le v_{max},
 \qquad
 |\omega|\le\omega_{max},
@@ -191,7 +203,7 @@ q_{min}\le q_k\le q_{max},
 W_{robot}(x_k,n_k)\le W_{libre}(X_k)-2\delta.
 \]
 
-No hay cotas de deslizamiento, ZMP, velocidad o aceleración articular, bandas,
+No hay cotas de deslizamiento, ZMP, aceleración articular, velocidad de banda,
 *scrubbing*, simetría ni restricciones independientes por vértice.
 
 ## Restricción única de anchura
@@ -225,14 +237,16 @@ deslizamiento se siguen calculando solo para diagnóstico y validación posterio
 
 Si IPOPT consume su presupuesto de tiempo, el controlador no aplica una
 iteración arbitraria: conserva o reconstruye una secuencia y comprueba
-numéricamente dinámica, articulaciones, módulo de velocidad, velocidad angular
-y anchura antes de usar su primer mando. Esta reserva no introduce un objetivo
-nuevo; solo mantiene una salida factible en ejecución online.
+numéricamente dinámica, posición articular, velocidad articular, módulo de
+velocidad, velocidad angular y anchura antes de usar su primer mando. Esta
+reserva no introduce un objetivo nuevo; solo mantiene una salida factible en
+ejecución online.
 
-Eliminar velocidades articulares y deslizamiento es deliberado, pero tiene una
-consecuencia visible: el servo ideal puede pedir cambios grandes de \(q_i\) y el
-diagnóstico de *slip* de huella puede crecer. Debe interpretarse como una
-limitación de esta versión mínima, no como una predicción apta para hardware.
+La velocidad articular limitada evita cambios instantáneos de configuración,
+pero el modelo continúa siendo cinemático: no representa aceleraciones,
+par/torque, saturación de la velocidad de banda ni dinámica del actuador. Esos
+efectos deberán incorporarse antes de usar la predicción como modelo de
+hardware.
 
 ## Simulación y teleoperación
 
@@ -244,4 +258,6 @@ El visualizador conserva por separado:
 
 En modo manual, los tres deslizadores controlan directamente \(v_x\), \(v_y\)
 y \(\omega\). La misma cinemática inversa que usa el MPC genera las consignas
-de las orugas en vivo.
+de las orugas en vivo. La restricción de velocidad articular pertenece al NMPC;
+el modo manual continúa siendo una entrada cinemática directa y debe emplearse
+con límites adecuados en la capa de actuación real.
