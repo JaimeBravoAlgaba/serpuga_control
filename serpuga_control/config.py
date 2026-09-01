@@ -8,9 +8,6 @@ import numpy as np
 
 
 def _default_pivots() -> np.ndarray:
-    # q=(0, 0) places both tracks parallel and side by side. Coordinates are
-    # expressed from the centre of the rigid bar, which is the controlled
-    # point of the planar model.
     return np.array([[0.0, 0.24], [0.0, -0.24]], dtype=float)
 
 
@@ -24,12 +21,7 @@ def _default_nominal_configuration() -> np.ndarray:
 
 @dataclass(frozen=True)
 class RobotParameters:
-    """Geometric, inertial and articulation parameters.
-
-    The defaults are deliberately illustrative.  All dimensions are in SI
-    units and live here so the control code does not depend on the prototype
-    geometry.
-    """
+    """Geometric, inertial and articulation parameters."""
 
     pivot_positions: np.ndarray = field(default_factory=_default_pivots)
     track_center_offsets: np.ndarray = field(default_factory=_default_offsets)
@@ -44,7 +36,6 @@ class RobotParameters:
     )
     com_height: float = 0.24
 
-    # The illustrative mechanism folds symmetrically: q1 <= 0 and q2 >= 0.
     q_min: np.ndarray = field(
         default_factory=lambda: np.deg2rad(np.array([-70.0, 0.0]))
     )
@@ -55,12 +46,6 @@ class RobotParameters:
 
     @classmethod
     def opposed_tracks(cls) -> RobotParameters:
-        """Geometry with a transverse bar and antiparallel nominal tracks.
-
-        Track 1 extends along +x and track 2 along -x.  Their pivots lie on
-        the body y axis, so the connector is perpendicular to forward motion.
-        """
-
         return cls(
             pivot_positions=np.array([[0.0, 0.24], [0.0, -0.24]], dtype=float),
             q_min=np.deg2rad(np.array([-70.0, 110.0])),
@@ -98,7 +83,7 @@ class RobotParameters:
 
 @dataclass(frozen=True)
 class MPCParameters:
-    """Compact prediction, tracking, shape and clearance settings."""
+    """Compact prediction, tracking, shape and actuator-limit settings."""
 
     dt: float = 0.15
     horizon_steps: int = 18
@@ -115,6 +100,7 @@ class MPCParameters:
     body_speed_limit: float = 0.65
     body_yaw_rate_limit: float = 1.2
     articulation_rate_limit: float = 1.5
+    track_speed_limit: float = 0.65
     regularisation: float = 1.0e-7
     smooth_epsilon: float = 1.0e-3
 
