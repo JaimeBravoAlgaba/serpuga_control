@@ -114,6 +114,7 @@ class MPCParameters:
     clearance_margin: float = 0.01
     body_speed_limit: float = 0.65
     body_yaw_rate_limit: float = 1.2
+    articulation_rate_limit: float = 1.5
     regularisation: float = 1.0e-7
     smooth_epsilon: float = 1.0e-3
 
