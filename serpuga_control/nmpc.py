@@ -19,11 +19,8 @@ from .trajectory import ReferencePreview
 @dataclass
 class NMPCSolution:
     success: bool
-    # Public MPC output: [q1_cmd, q2_cmd, v1, v2].
-    control: np.ndarray
-    # Representative midpoint rigid-body twist [v_x, v_y, omega].
-    body_twist: np.ndarray
-    # Explicit alias for downstream actuator interfaces.
+    control: np.ndarray  # [q1_cmd, q2_cmd, v1, v2]
+    body_twist: np.ndarray  # representative midpoint [v_x, v_y, omega]
     actuator_command: np.ndarray
     predicted_states: np.ndarray
     predicted_controls: np.ndarray
@@ -96,9 +93,13 @@ class NMPCController:
         for step in range(n):
             state = self.states[:, step]
             control = self.controls[:, step]
-            q_mid = self.model.interval_axes(state[3:5], control, 0.5)
-            twist = self.model.interval_body_twist(state, control)
-            q_rates = self.model.articulation_rates(state[3:5], control)
+            q_start = state[3:5]
+            q_mid = self.model.interval_axes(q_start, control, 0.5)
+            q_end = control[0:2]
+            twist_start = self.model.body_twist(control, q=q_start)
+            twist_mid = self.model.body_twist(control, q=q_mid)
+            twist_end = self.model.body_twist(control, q=q_end)
+            q_rates = self.model.articulation_rates(q_start, control)
 
             self.opti.subject_to(
                 self.opti.bounded(
@@ -107,15 +108,19 @@ class NMPCController:
                     p.articulation_rate_limit,
                 )
             )
-            self.opti.subject_to(ca.sumsqr(twist[0:2]) <= p.body_speed_limit**2)
-            self.opti.subject_to(
-                self.opti.bounded(
-                    -p.body_yaw_rate_limit,
-                    twist[2],
-                    p.body_yaw_rate_limit,
+            for bounded_twist in (twist_start, twist_mid, twist_end):
+                self.opti.subject_to(
+                    ca.sumsqr(bounded_twist[0:2]) <= p.body_speed_limit**2
                 )
-            )
+                self.opti.subject_to(
+                    self.opti.bounded(
+                        -p.body_yaw_rate_limit,
+                        bounded_twist[2],
+                        p.body_yaw_rate_limit,
+                    )
+                )
 
+            midpoint_state = self.model.intermediate_state(state, control, 0.5)
             next_state = self.model.discrete_step(state, control)
             self.opti.subject_to(self.states[:, step + 1] == next_state)
 
@@ -128,7 +133,7 @@ class NMPCController:
             position_error = state[0:2] - self.reference_poses[0:2, step]
             heading_error = state[2] - desired_heading
             velocity_error = world_velocity - desired_world_velocity
-            yaw_rate_error = twist[2] - self.reference_yaw_rates[0, step]
+            yaw_rate_error = twist_mid[2] - self.reference_yaw_rates[0, step]
             parallelism_error = self.robot.parallelism_residual(q_mid)
 
             objective += p.position_weight * ca.sumsqr(position_error)
@@ -138,6 +143,7 @@ class NMPCController:
             objective += p.parallelism_weight * parallelism_error**2
 
             self._add_corridor_constraint(state)
+            self._add_corridor_constraint(midpoint_state)
 
         terminal_state = self.states[:, n]
         self._add_corridor_constraint(terminal_state)
@@ -176,8 +182,6 @@ class NMPCController:
         self.opti.solver("ipopt", plugin_options, solver_options)
 
     def _add_corridor_constraint(self, state: ca.MX) -> None:
-        """Impose one smooth inequality against the physical corridor walls."""
-
         residual = self.corridor.clearance_residual(
             self.robot.footprint_vertices_world(state),
             margin=self.parameters.clearance_margin,
@@ -200,8 +204,6 @@ class NMPCController:
         desired_world_velocity: np.ndarray,
         desired_yaw_rate: float,
     ) -> np.ndarray:
-        """Build an actuator-level warm-start command without analytic IK."""
-
         p = self.parameters
         q = np.asarray(state[3:5], dtype=float).copy()
         yaw = float(state[2])
@@ -259,8 +261,6 @@ class NMPCController:
             control_guess = np.column_stack(
                 (self._last_controls[:, 1:], self._last_controls[:, -1])
             )
-            # The shifted sequence preserves all previous inter-step rate bounds;
-            # only its first q command must be re-anchored to the measured q.
             delta = np.clip(
                 control_guess[0:2, 0] - state[3:5],
                 -self.parameters.articulation_rate_limit * self.parameters.dt,
@@ -274,9 +274,7 @@ class NMPCController:
         self._current_control_guess = control_guess
 
     def _rollout(self, state: np.ndarray, controls: np.ndarray) -> np.ndarray:
-        states = np.zeros(
-            (self.state_dimension, controls.shape[1] + 1), dtype=float
-        )
+        states = np.zeros((self.state_dimension, controls.shape[1] + 1), dtype=float)
         states[:, 0] = np.asarray(state, dtype=float).reshape(self.state_dimension)
         for step in range(controls.shape[1]):
             states[:, step + 1] = np.asarray(
@@ -313,7 +311,7 @@ class NMPCController:
         controls: np.ndarray,
         preview: ReferencePreview,
     ) -> bool:
-        del preview  # Feasibility is now referenced to physical corridor geometry.
+        del preview
         p = self.parameters
         r = self.robot.parameters
         tolerance = max(10.0 * p.ipopt_tolerance, 1.0e-6)
@@ -334,14 +332,23 @@ class NMPCController:
         if np.any(np.abs(q_rates) > p.articulation_rate_limit + tolerance):
             return False
 
-        twists = self._evaluate_twists(states, controls)
-        if np.any(
-            np.linalg.norm(twists[0:2, :], axis=0)
-            > p.body_speed_limit + tolerance
-        ):
-            return False
-        if np.any(np.abs(twists[2, :]) > p.body_yaw_rate_limit + tolerance):
-            return False
+        for step in range(controls.shape[1]):
+            state = states[:, step]
+            control = controls[:, step]
+            for fraction in (0.0, 0.5, 1.0):
+                q = self.model.interval_axes(state[3:5], control, fraction)
+                twist = np.asarray(
+                    self.model.body_twist(control, q=q), dtype=float
+                ).reshape(3)
+                if np.linalg.norm(twist[0:2]) > p.body_speed_limit + tolerance:
+                    return False
+                if abs(twist[2]) > p.body_yaw_rate_limit + tolerance:
+                    return False
+            midpoint_state = np.asarray(
+                self.model.intermediate_state(state, control, 0.5), dtype=float
+            ).reshape(self.state_dimension)
+            if self._numeric_corridor_residual(midpoint_state) > tolerance:
+                return False
 
         for step in range(states.shape[1]):
             if self._numeric_corridor_residual(states[:, step]) > tolerance:
@@ -454,10 +461,7 @@ class NMPCController:
                 )
             except RuntimeError as retry_error:
                 status = str(self.opti.stats().get("return_status", "Solve_Failed"))
-                headline = (
-                    str(retry_error).splitlines()[0]
-                    or str(first_error).splitlines()[0]
-                )
+                headline = str(retry_error).splitlines()[0] or str(first_error).splitlines()[0]
 
             if self._guess_is_feasible(state_guess, control_guess, preview):
                 return self._fallback_solution(
