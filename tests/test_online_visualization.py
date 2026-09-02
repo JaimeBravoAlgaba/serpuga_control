@@ -25,7 +25,7 @@ def test_online_plot_shows_initialised_robot_before_run(tmp_path) -> None:
     assert len(plot.track_patches) == 2
 
 
-def test_online_plot_arrows_follow_signed_track_speeds() -> None:
+def test_online_plot_arrows_follow_signed_track_speeds_and_control_labels() -> None:
     configuration = ConfigurationStore(BUILTIN_CONFIGS).load("parallel-gap")
     figure = Figure(figsize=(9, 6), dpi=80)
     plot = OnlineSimulationPlot(figure, lambda: None)
@@ -33,17 +33,18 @@ def test_online_plot_arrows_follow_signed_track_speeds() -> None:
     initial = configuration.simulation.initial_state
     states = np.vstack((initial, initial.copy()))
     states[1, 0] = 0.03
+    control = np.array([[0.2, -0.1, 0.2, -0.2]])
 
     log = SimulationLog(
         times=np.array([0.0]),
         states=states,
-        controls=np.array([[0.0, 0.0, 0.0]]),
-        actuator_commands=np.array([[0.0, 0.0, 0.2, -0.2]]),
+        controls=control.copy(),
+        actuator_commands=control.copy(),
         reference_poses=np.zeros((1, 3)),
         reference_speeds=np.array([0.0]),
         reference_yaw_rates=np.array([0.0]),
-        body_twists=np.zeros((1, 3)),
-        world_velocities=np.zeros((1, 2)),
+        body_twists=np.array([[0.12, 0.03, 0.01]]),
+        world_velocities=np.array([[0.12, 0.03]]),
         slips=np.zeros((1, 2, 2)),
         stability_margins=np.array([0.2]),
         clearances=np.array([0.1]),
@@ -61,3 +62,8 @@ def test_online_plot_arrows_follow_signed_track_speeds() -> None:
     second_x, _ = plot.direction_lines[1].get_data()
     assert first_x[1] > first_x[0]
     assert second_x[1] < second_x[0]
+
+    telemetry = plot.telemetry.get_text()
+    assert "q1*,q2*" in telemetry
+    assert "vx, vy    0.120,  0.030 m/s" in telemetry
+    assert "v1, v2    0.200, -0.200 m/s" in telemetry
