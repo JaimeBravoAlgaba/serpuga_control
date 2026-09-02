@@ -57,23 +57,33 @@ class KinematicModel:
             )
         return np.vstack(rows)
 
+    def _rigid_body_gain(self) -> np.ndarray:
+        """Constant regularised least-squares map from pivot requests to twist.
+
+        The geometry and regularisation are constant for one controller, so the
+        3x4 gain can be computed numerically once per call instead of embedding
+        a symbolic linear solve in the CasADi graph.  Besides being cheaper,
+        this remains compatible with Opti's ``expand=True`` path in CasADi 3.8.
+        """
+
+        a = self._rigid_body_matrix()
+        normal = a.T @ a + self.mpc_parameters.regularisation * np.eye(3)
+        return np.linalg.solve(normal, a.T)
+
     def body_twist_from_axes(self, q: Any, belt: Any) -> Any:
         """Rigid-body twist induced by instantaneous track axes and belt speeds."""
 
         symbolic = is_symbolic(q[0]) or is_symbolic(belt[0])
-        a_np = self._rigid_body_matrix()
-        regularisation = self.mpc_parameters.regularisation
+        gain = self._rigid_body_gain()
 
         if symbolic:
-            a = ca.DM(a_np)
             desired = ca.vertcat(
                 belt[0] * ca.cos(q[0]),
                 belt[0] * ca.sin(q[0]),
                 belt[1] * ca.cos(q[1]),
                 belt[1] * ca.sin(q[1]),
             )
-            normal = a.T @ a + regularisation * ca.DM.eye(3)
-            return ca.solve(normal, a.T @ desired)
+            return ca.DM(gain) @ desired
 
         q_np = np.asarray(q, dtype=float).reshape(2)
         belt_np = np.asarray(belt, dtype=float).reshape(2)
@@ -86,8 +96,7 @@ class KinematicModel:
             ],
             dtype=float,
         )
-        normal = a_np.T @ a_np + regularisation * np.eye(3)
-        return np.linalg.solve(normal, a_np.T @ desired)
+        return gain @ desired
 
     def body_twist(self, control: Any, q: Any | None = None) -> Any:
         """Return the twist for ``control`` at the supplied actual track angles."""
@@ -187,12 +196,7 @@ class KinematicModel:
         return np.r_[pose_rate, np.asarray(q_rates, dtype=float).reshape(2)]
 
     def intermediate_state(self, state: Any, control: Any, fraction: float) -> Any:
-        """Integrate the state up to ``fraction`` of the control interval.
-
-        The articulation interpolation is defined over the full controller
-        period, so a fractional RK4 integration uses the corresponding track
-        angles at the beginning, midpoint and end of that subinterval.
-        """
+        """Integrate the state up to ``fraction`` of the control interval."""
 
         if not 0.0 <= fraction <= 1.0:
             raise ValueError("fraction must lie in [0, 1]")
