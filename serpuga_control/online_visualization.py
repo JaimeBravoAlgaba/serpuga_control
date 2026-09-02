@@ -234,11 +234,7 @@ class OnlineSimulationPlot:
             [], [], color=COLOURS["amber"], linewidth=1.8, label="Margen soporte"
         )
         (self.clearance_line,) = self.safety.plot(
-            [],
-            [],
-            color=COLOURS["ink"],
-            linestyle="--",
-            label="Holgura",
+            [], [], color=COLOURS["ink"], linestyle="--", label="Holgura"
         )
         self.safety.axhline(0.0, color=COLOURS["red"], linestyle=":", linewidth=1.0)
         self._style_axis(self.safety)
@@ -336,8 +332,7 @@ class OnlineSimulationPlot:
             return
         state = log.states[-1]
         current_control = log.controls[-1]
-        current_actuator = log.actuator_commands[-1]
-        track_speeds = current_actuator[2:4]
+        track_speeds = current_control[2:4]
         self._expand_scene_to_state(state)
         self._expand_time_axis(float(log.times[-1] + self.configuration.mpc.dt))
         self._update_robot(state, track_speeds)
@@ -363,19 +358,21 @@ class OnlineSimulationPlot:
         self._autoscale_y(self.safety)
 
         q = np.rad2deg(state[3:5])
+        q_cmd = np.rad2deg(current_control[0:2])
         index = -1
         mode = log.control_modes[index] if log.control_modes else "mpc"
         label = "MANUAL" if mode == "manual" else "ONLINE"
+        body_twist = log.body_twists[index]
         self.telemetry.set_text(
             f"{label} · t={log.times[index] + self.configuration.mpc.dt:05.2f} s\n"
-            f"vx, vy   {current_control[0]: .3f}, {current_control[1]: .3f} m/s\n"
+            f"vx, vy   {body_twist[0]: .3f}, {body_twist[1]: .3f} m/s\n"
             f"v1, v2   {track_speeds[0]: .3f}, {track_speeds[1]: .3f} m/s\n"
-            f"v       {forward_speed[index]: .3f} / {log.reference_speeds[index]:.3f} m/s\n"
-            f"omega   {log.body_twists[index, 2]: .3f} / "
-            f"{log.reference_yaw_rates[index]:.3f} rad/s\n"
-            f"q1, q2  {q[0]: .1f}, {q[1]: .1f} deg\n"
-            f"slip    {slip[index, 0]: .3f}, {slip[index, 1]:.3f} m/s\n"
-            f"soporte {log.stability_margins[index]: .3f} m   "
+            f"q1*,q2*  {q_cmd[0]: .1f}, {q_cmd[1]: .1f} deg\n"
+            f"v        {forward_speed[index]: .3f} / {log.reference_speeds[index]:.3f} m/s\n"
+            f"omega    {body_twist[2]: .3f} / {log.reference_yaw_rates[index]:.3f} rad/s\n"
+            f"q1, q2   {q[0]: .1f}, {q[1]: .1f} deg\n"
+            f"slip     {slip[index, 0]: .3f}, {slip[index, 1]:.3f} m/s\n"
+            f"soporte  {log.stability_margins[index]: .3f} m   "
             f"clear {log.clearances[index]:.3f} m"
         )
         self._draw()
