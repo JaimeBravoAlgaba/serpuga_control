@@ -181,6 +181,14 @@ class NMPCController:
         }
         self.opti.solver("ipopt", plugin_options, solver_options)
 
+    def _solver_status(self, default: str = "Solve_Failed") -> str:
+        """Read IPOPT status without masking failures before solver initialisation."""
+
+        try:
+            return str(self.opti.stats().get("return_status", default))
+        except RuntimeError:
+            return default
+
     def _add_corridor_constraint(self, state: ca.MX) -> None:
         residual = self.corridor.clearance_residual(
             self.robot.footprint_vertices_world(state),
@@ -421,12 +429,12 @@ class NMPCController:
                 states,
                 controls,
                 perf_counter() - start,
-                str(self.opti.stats().get("return_status", "Solve_Succeeded")),
+                self._solver_status("Solve_Succeeded"),
                 float(solution.value(self.objective_expression)),
             )
         except RuntimeError as first_error:
             elapsed = perf_counter() - start
-            status = str(self.opti.stats().get("return_status", "Solve_Failed"))
+            status = self._solver_status()
             if self._guess_is_feasible(
                 self._current_state_guess,
                 self._current_control_guess,
@@ -456,11 +464,11 @@ class NMPCController:
                     states,
                     controls,
                     perf_counter() - start,
-                    f"{self.opti.stats().get('return_status', 'Solve_Succeeded')} (fresh-start retry)",
+                    f"{self._solver_status('Solve_Succeeded')} (fresh-start retry)",
                     float(solution.value(self.objective_expression)),
                 )
             except RuntimeError as retry_error:
-                status = str(self.opti.stats().get("return_status", "Solve_Failed"))
+                status = self._solver_status()
                 headline = str(retry_error).splitlines()[0] or str(first_error).splitlines()[0]
 
             if self._guess_is_feasible(state_guess, control_guess, preview):
