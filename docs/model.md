@@ -9,89 +9,101 @@ x=[X,\,Y,\,\psi,\,q_1,\,q_2]^T,
 \]
 
 donde \((X,Y)\) es el centro de la barra rígida, \(\psi\) su orientación y
-\(q_i\) la orientación relativa de cada oruga.
+\(q_i\) la orientación relativa instantánea de cada oruga.
 
-Las únicas variables de control del MPC son el *twist* plano del centro de la
-barra, expresado en el sistema ligado a ella:
-
-\[
-u=\xi_B=[v_x,\,v_y,\,\omega]^T.
-\]
-
-Por tanto, `v1`, `v2`, `q1` y `q2` ya no son variables independientes del
-optimizador. Se calculan mediante la cinemática inversa analítica.
-
-## Cinemática inversa analítica
-
-Sea \(p_i\) la posición del pivote de la oruga \(i\) respecto al centro de la
-barra y
+Las variables de control del NMPC son directamente las consignas de actuación:
 
 \[
-J=\begin{bmatrix}0&-1\\1&0\end{bmatrix}.
+u=[q_{1,cmd},\,q_{2,cmd},\,v_1,\,v_2]^T.
 \]
 
-La velocidad requerida en cada pivote es
+Por tanto, no existe una etapa de cinemática inversa entre el optimizador y los
+actuadores. Las dos primeras componentes son objetivos articulares al final del
+periodo de control y las dos últimas son velocidades longitudinales firmadas de
+las bandas.
+
+## Cinemática directa desde las orugas
+
+Sea \(p_i=[p_{x,i},p_{y,i}]^T\) la posición del pivote de la oruga \(i\) respecto
+al centro de la barra y sea
+
+\[
+e(q_i)=\begin{bmatrix}\cos q_i\\\sin q_i\end{bmatrix}.
+\]
+
+Para una velocidad rígida de la barra
+
+\[
+\xi_B=[v_x,\,v_y,\,\omega]^T,
+\]
+
+la velocidad del pivote \(i\) es
 
 \[
 u_i=
 \begin{bmatrix}v_x\\v_y\end{bmatrix}
-+\omega Jp_i.
++\omega
+\begin{bmatrix}-p_{y,i}\\p_{x,i}\end{bmatrix}.
 \]
 
-Como una oruga solo puede generar velocidad longitudinal, su eje debe ser
-paralelo a \(u_i\). Puesto que la velocidad de banda es firmada, las
-orientaciones \(q_i\) y \(q_i+\pi\) representan el mismo eje físico. Se elige
-la solución equivalente más próxima al ángulo actual para evitar giros
-innecesarios de 180 grados.
-
-La implementación emplea la siguiente forma analítica y regularizada. Con
+La oruga solicita en ese punto la velocidad longitudinal
 
 \[
-a_i=e(q_i)^Tu_i,
+u_i^d=v_i e(q_i).
+\]
+
+Apilando las dos ecuaciones vectoriales se obtiene un sistema de cuatro
+ecuaciones para tres componentes de twist,
+
+\[
+A\xi_B=b(q_1,q_2,v_1,v_2).
+\]
+
+Como ambas orugas pueden pedir velocidades incompatibles con un único movimiento
+rígido, el modelo calcula la solución regularizada
+
+\[
+\xi_B=(A^TA+\lambda I)^{-1}A^Tb.
+\]
+
+El pequeño término de Tikhonov \(\lambda\) está configurado por `regularisation`.
+El twist resultante es una variable derivada: sirve para integrar la pose,
+calcular el seguimiento y diagnosticar incompatibilidades, pero no es una salida
+directa del MPC.
+
+## Movimiento articular dentro del periodo
+
+La restricción de velocidad articular se define como
+
+\[
+\dot q_i=\frac{q_{i,cmd}-q_i}{\Delta t},
 \qquad
-b_i=n(q_i)^Tu_i,
+|\dot q_i|\le \dot q_{max}.
 \]
 
-se calcula
+A diferencia de una aproximación de servo instantáneo, el modelo no utiliza
+`q_cmd` durante todo el intervalo. Se asume una interpolación lineal:
 
 \[
-\Delta q_i=
-\frac{1}{2}
-\operatorname{atan2}
-\left(
-2a_ib_i,
-a_i^2-b_i^2+\varepsilon^2
-\right),
+q_i(\alpha)=q_i(k)+\alpha\,[q_{i,cmd}(k)-q_i(k)],
+\qquad \alpha\in[0,1].
 \]
+
+La integración RK4 de la pose evalúa la cinemática con los ángulos de inicio,
+mitad y final del intervalo. Al terminar el periodo se cumple
 
 \[
-q_i^*=q_i+\Delta q_i,
-\qquad
-v_i^*=e(q_i^*)^Tu_i.
+q_i(k+1)=q_{i,cmd}(k).
 \]
 
-La salida de la inversa tiene el orden
+Así, limitar la velocidad articular tiene efecto también sobre la predicción de
+la pose: una reconfiguración no modifica instantáneamente la dirección efectiva
+de las orugas.
 
-\[
-u_{act}=[q_1^*,\,q_2^*,\,v_1^*,\,v_2^*]^T.
-\]
+## Evolución de la pose
 
-Si \(u_i=0\), se conserva el ángulo anterior y se asigna \(v_i^*=0\). El
-signo de \(v_i^*\) es físico: permite que una oruga montada a 180 grados se
-desplace en sentido opuesto sin reorientarse.
-
-En el contacto puntual ideal del pivote se cumple
-
-\[
-v_i^*e(q_i^*)=u_i,
-\]
-
-por lo que la solución tiene deslizamiento nulo en ese punto siempre que los
-límites articulares y de actuación permitan aplicarla.
-
-## Evolución del estado
-
-La pose de la barra se integra directamente desde el control:
+Para cada valor instantáneo de \(q\), la cinemática directa proporciona
+\(\xi_B(q,v_1,v_2)\). Entonces
 
 \[
 \begin{bmatrix}\dot X\\\dot Y\end{bmatrix}
@@ -101,163 +113,172 @@ La pose de la barra se integra directamente desde el control:
 \dot\psi=\omega.
 \]
 
-La implementación usa RK4 con control constante durante cada periodo. Para las
-articulaciones se mantiene un servo ideal de posición dentro de cada periodo:
-al final del intervalo se alcanza \(q_i^*\). La velocidad articular media
-requerida es
+La velocidad del mundo utilizada en el coste de seguimiento es la velocidad
+media del paso discreto,
 
 \[
-\dot q_i=\frac{q_i^*-q_i}{\Delta t}.
+v_k^W=\frac{p_{k+1}-p_k}{\Delta t},
 \]
 
-A diferencia de la primera formulación mínima, esta velocidad sí está limitada
-como restricción dura del NMPC:
+por lo que incorpora la evolución articular durante el intervalo.
+
+## Deslizamiento e incompatibilidad cinemática
+
+Para unos ángulos reales \(q_i\), el residuo en los pivotes es
 
 \[
--\dot q_{max}\leq \dot q_i\leq \dot q_{max}.
+r=A\xi_B-b.
 \]
 
-La inversa selecciona el eje equivalente más próximo al ángulo actual, por lo
-que la diferencia \(q_i^*-q_i\) se evalúa sobre la rama angular local y no
-requiere introducir saltos artificiales de \(2\pi\) en el grafo de CasADi. El
-modelo sigue sin incluir aceleración ni dinámica interna del servo.
-
-## Deslizamiento de una huella finita
-
-La inversa anterior usa los pivotes como contactos puntuales. Para conservar
-la información geométrica de una oruga real, el coste y las restricciones de
-deslizamiento se evalúan en el centro de cada huella.
-
-Si
+Cada bloque \(r_i\in\mathbb R^2\) se proyecta sobre la dirección longitudinal y
+lateral de la oruga:
 
 \[
-r_i(q_i)=p_i+R(q_i)\rho_i,
+s_{i,\parallel}=e(q_i)^T r_i,
+\qquad
+s_{i,\perp}=n(q_i)^T r_i,
 \]
 
-su velocidad es
+con
 
 \[
-u_{c,i}=v_B+\omega Jr_i+
-\frac{\partial r_i}{\partial q_i}\dot q_i,
+n(q_i)=\begin{bmatrix}-\sin q_i\\\cos q_i\end{bmatrix}.
 \]
 
-y el residuo es
+Estas magnitudes se registran como diagnóstico. No forman parte del coste ni de
+las restricciones del NMPC simplificado.
+
+## Formulación del NMPC
+
+En cada etapa el optimizador decide
 
 \[
-s_i=u_{c,i}-v_i^*e(q_i).
+u_k=[q_{1,cmd,k},\,q_{2,cmd,k},\,v_{1,k},\,v_{2,k}]^T.
 \]
 
-Así, el contacto puntual de la inversa puede ser exacto y, al mismo tiempo, el
-simulador puede mostrar deslizamiento transitorio durante la reorientación y
-*scrubbing* debido a la longitud finita de la huella. Estas magnitudes se
-registran como diagnósticos: no forman parte del coste ni de las restricciones
-del MPC simplificado.
-
-## Formulación del MPC
-
-En cada instante del horizonte, el optimizador decide solamente
+La dinámica se impone mediante disparo múltiple:
 
 \[
-u_k=[v_{x,k},\,v_{y,k},\,\omega_k]^T.
+x_0=x_{medido},
+\qquad
+x_{k+1}=f(x_k,u_k).
 \]
 
-Dentro del grafo simbólico de CasADi se evalúa la cinemática inversa para
-obtener \(q_{i,k}^*\) y \(v_{i,k}^*\). El coste de etapa contiene únicamente
-seguimiento y paralelismo:
+El coste de etapa es
 
 \[
 \begin{aligned}
 \ell_k={}&w_p\|p_k-p_k^r\|^2
 +2w_\psi[1-\cos(\psi_k-\psi_k^r)]\\
 &+w_v\|v_k^W-v_k^r\|^2
-+w_\omega(\omega_k-\omega_k^r)^2\\
-&+w_{\parallel}\sin^2(q_{1,k}-q_{2,k}).
++w_\omega(\omega_{mid,k}-\omega_k^r)^2\\
+&+w_{\parallel}\sin^2(q_{1,mid,k}-q_{2,mid,k}).
 \end{aligned}
 \]
 
-El último término vale cero tanto si las orugas apuntan en el mismo sentido
-como si sus direcciones difieren \(180^\circ\). Por tanto mide el paralelismo
-de sus ejes físicos, no el signo de las velocidades de banda. Se añaden los
-términos terminales de posición y orientación de la misma referencia.
+El término de paralelismo vale cero tanto para ejes paralelos como antiparalelos.
+Se añaden términos terminales de posición y orientación.
 
-La formulación conserva cinco familias de desigualdades. La condición inicial
-y la dinámica se imponen mediante disparo múltiple:
+## Restricciones de actuación y velocidad
 
-\[
-x_0=x_{medido},\qquad x_{k+1}=f(x_k,u_k),
-\]
+Se imponen
 
 \[
 q_{min}\le q_k\le q_{max},
 \qquad
-|\dot q_{i,k}|\le \dot q_{max},
+q_{min}\le q_{cmd,k}\le q_{max},
 \]
 
 \[
-\|[v_x,v_y]^T\|_2\le v_{max},
+|q_{cmd,k}-q_k|\le \dot q_{max}\Delta t,
+\]
+
+\[
+|v_{i,k}|\le v_{track,max}.
+\]
+
+Además, el twist derivado debe cumplir
+
+\[
+\|[v_x,v_y]^T\|_2\le v_{body,max},
 \qquad
-|\omega|\le\omega_{max},
+|\omega|\le\omega_{max}.
 \]
+
+Estas dos últimas cotas se comprueban en los ángulos articulares de inicio,
+mitad y final de cada periodo, no únicamente en `q_cmd`.
+
+## Restricción geométrica del corredor
+
+`StraightGapCorridor` describe un corredor cuyo centro lateral es `centre_y` y
+cuya anchura depende de la coordenada longitudinal \(x\). Sus paredes son
 
 \[
-W_{robot}(x_k,n_k)\le W_{libre}(X_k)-2\delta.
+y_{sup}(x)=y_c+\frac{W(x)}{2},
+\qquad
+y_{inf}(x)=y_c-\frac{W(x)}{2}.
 \]
 
-No hay cotas de deslizamiento, ZMP, aceleración articular, velocidad de banda,
-*scrubbing*, simetría ni restricciones independientes por vértice.
-
-## Restricción única de anchura
-
-Sea \(n_k=[-\sin\psi_k^r,\cos\psi_k^r]^T\) la normal a la trayectoria. La
-anchura centrada que necesita la formación, incluyendo ambas orugas, el brazo
-y cualquier error lateral respecto al centro de la trayectoria, es
+Para cada vértice mundial \(z_j=[x_j,y_j]^T\) de la huella completa se define
 
 \[
-W_{robot}=2\max_{z_j\in\mathcal F}
-\left|n_k^T(z_j-p_k^r)\right|,
+g_j=|y_j-y_c|+\delta-\frac{W(x_j)}{2},
 \]
 
-donde \(\mathcal F\) contiene los doce vértices de la huella geométrica. Para
-anticipar una transición, el ancho disponible es el menor valor del corredor
-bajo toda la huella longitudinal:
+donde \(\delta\) es `clearance_margin`.
+
+La condición física de no colisión es \(g_j\le 0\) para todos los vértices. Para
+mantener una única desigualdad geométrica por estado, el controlador construye
 
 \[
-W_{libre}=\min_{z_j\in\mathcal F}W_{corredor}(z_{j,x}).
+g_{corr}=\operatorname{smax}_\varepsilon(g_1,\ldots,g_m)\le 0,
 \]
 
-En el grafo simbólico se emplean máximos y mínimos suavizados con
-\(\varepsilon=10^{-3}\). `StraightGapCorridor` simula el valor que más adelante
-proporcionará el bloque láser. Aunque se evalúen los vértices para calcular
-ambos escalares, el optimizador recibe una sola desigualdad de anchura por
-instante, no una restricción independiente por vértice.
+usando valor absoluto y máximo suavizados. Esta formulación respeta directamente
+las paredes del corredor y su desplazamiento `centre_y`; no utiliza la posición
+de la referencia como centro geométrico del hueco.
 
-La referencia \(p_k^r\) hace que la misma magnitud incluya el centrado lateral.
-El margen de soporte geométrico, la holgura real vértice-pared y el
-deslizamiento se siguen calculando solo para diagnóstico y validación posterior.
+La restricción se evalúa en los estados discretos y también en el estado
+intermedio de cada periodo para reducir el riesgo de una colisión transitoria
+durante la reconfiguración.
 
-Si IPOPT consume su presupuesto de tiempo, el controlador no aplica una
-iteración arbitraria: conserva o reconstruye una secuencia y comprueba
-numéricamente dinámica, posición articular, velocidad articular, módulo de
-velocidad, velocidad angular y anchura antes de usar su primer mando. Esta
-reserva no introduce un objetivo nuevo; solo mantiene una salida factible en
-ejecución online.
+## Reserva factible
 
-La velocidad articular limitada evita cambios instantáneos de configuración,
-pero el modelo continúa siendo cinemático: no representa aceleraciones,
-par/torque, saturación de la velocidad de banda ni dinámica del actuador. Esos
-efectos deberán incorporarse antes de usar la predicción como modelo de
-hardware.
+Si IPOPT no devuelve una solución dentro del presupuesto configurado, el
+controlador comprueba numéricamente la secuencia de warm-start antes de usarla.
+Se verifican:
+
+- límites articulares y de velocidad articular;
+- límites de velocidad de banda;
+- velocidad lineal y angular derivadas al inicio, mitad y final de cada paso;
+- despeje frente al corredor en estados y puntos intermedios.
+
+Sólo una secuencia que supera todas estas comprobaciones puede utilizarse como
+fallback.
 
 ## Simulación y teleoperación
 
-El visualizador conserva por separado:
+`SimulationLog.controls` y `SimulationLog.actuator_commands` contienen el mismo
+orden de cuatro consignas:
 
-- `controls`: \([v_x,v_y,\omega]\), las decisiones del MPC o del usuario;
-- `actuator_commands`: \([q_1,q_2,v_1,v_2]\), la salida de la cinemática
-  inversa.
+\[
+[q_{1,cmd},q_{2,cmd},v_1,v_2].
+\]
 
-En modo manual, los tres deslizadores controlan directamente \(v_x\), \(v_y\)
-y \(\omega\). La misma cinemática inversa que usa el MPC genera las consignas
-de las orugas en vivo. La restricción de velocidad articular pertenece al NMPC;
-el modo manual continúa siendo una entrada cinemática directa y debe emplearse
-con límites adecuados en la capa de actuación real.
+`body_twists` almacena por separado el twist derivado de cada intervalo y
+`world_velocities` la velocidad media del mundo utilizada para el seguimiento.
+Los visualizadores muestran explícitamente ambas familias de magnitudes para no
+confundir ángulos articulares con velocidades cartesianas.
+
+El modo manual conserva los tres mandos `[vx, vy, omega]` únicamente como capa de
+compatibilidad de interfaz. En ese modo las articulaciones permanecen en su
+posición actual y las velocidades de banda se proyectan sobre los ejes reales de
+las orugas; el NMPC no interviene.
+
+## Alcance
+
+El modelo es todavía cinemático. No incluye aceleraciones, pares, dinámica
+interna de actuadores, fuerzas de contacto ni dinámica completa del terreno. La
+interpolación articular y las restricciones intermedias corrigen la inconsistencia
+de considerar `q_cmd` instantáneo, pero no sustituyen un modelo dinámico de bajo
+nivel para ejecución sobre hardware.
