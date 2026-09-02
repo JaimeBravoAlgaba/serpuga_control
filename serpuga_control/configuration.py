@@ -1,6 +1,6 @@
 """User-facing simulation configuration and YAML profile storage.
 
-The numerical dataclasses remain the contract used by the controller.  This
+The numerical dataclasses remain the contract used by the controller. This
 module is the single boundary exposed to users: it defines every editable
 field, its unit, its UI grouping and its YAML representation.
 """
@@ -59,76 +59,23 @@ def _field(
 
 FORM_FIELDS: tuple[ParameterField, ...] = (
     # Robot · geometry
-    _field(
-        "Robot", "Geometría", "robot", "pivot_1_x_m", "Pivote 1 · x desde centro", "m"
-    ),
-    _field(
-        "Robot", "Geometría", "robot", "pivot_1_y_m", "Pivote 1 · y desde centro", "m"
-    ),
-    _field(
-        "Robot", "Geometría", "robot", "pivot_2_x_m", "Pivote 2 · x desde centro", "m"
-    ),
-    _field(
-        "Robot", "Geometría", "robot", "pivot_2_y_m", "Pivote 2 · y desde centro", "m"
-    ),
-    _field(
-        "Robot", "Geometría", "robot", "track_1_offset_x_m", "Offset oruga 1 · x", "m"
-    ),
-    _field(
-        "Robot", "Geometría", "robot", "track_1_offset_y_m", "Offset oruga 1 · y", "m"
-    ),
-    _field(
-        "Robot", "Geometría", "robot", "track_2_offset_x_m", "Offset oruga 2 · x", "m"
-    ),
-    _field(
-        "Robot", "Geometría", "robot", "track_2_offset_y_m", "Offset oruga 2 · y", "m"
-    ),
+    _field("Robot", "Geometría", "robot", "pivot_1_x_m", "Pivote 1 · x desde centro", "m"),
+    _field("Robot", "Geometría", "robot", "pivot_1_y_m", "Pivote 1 · y desde centro", "m"),
+    _field("Robot", "Geometría", "robot", "pivot_2_x_m", "Pivote 2 · x desde centro", "m"),
+    _field("Robot", "Geometría", "robot", "pivot_2_y_m", "Pivote 2 · y desde centro", "m"),
+    _field("Robot", "Geometría", "robot", "track_1_offset_x_m", "Offset oruga 1 · x", "m"),
+    _field("Robot", "Geometría", "robot", "track_1_offset_y_m", "Offset oruga 1 · y", "m"),
+    _field("Robot", "Geometría", "robot", "track_2_offset_x_m", "Offset oruga 2 · x", "m"),
+    _field("Robot", "Geometría", "robot", "track_2_offset_y_m", "Offset oruga 2 · y", "m"),
     _field("Robot", "Geometría", "robot", "track_length_m", "Longitud de oruga", "m"),
     _field("Robot", "Geometría", "robot", "track_width_m", "Anchura de oruga", "m"),
-    _field(
-        "Robot", "Geometría", "robot", "connector_thickness_m", "Espesor del brazo", "m"
-    ),
+    _field("Robot", "Geometría", "robot", "connector_thickness_m", "Espesor del brazo", "m"),
     # Robot · mass
-    _field(
-        "Robot",
-        "Masa y centro de masas",
-        "robot",
-        "body_mass_kg",
-        "Masa del cuerpo",
-        "kg",
-    ),
-    _field(
-        "Robot",
-        "Masa y centro de masas",
-        "robot",
-        "track_mass_kg",
-        "Masa de cada oruga",
-        "kg",
-    ),
-    _field(
-        "Robot",
-        "Masa y centro de masas",
-        "robot",
-        "body_com_x_m",
-        "CoM cuerpo · x",
-        "m",
-    ),
-    _field(
-        "Robot",
-        "Masa y centro de masas",
-        "robot",
-        "body_com_y_m",
-        "CoM cuerpo · y",
-        "m",
-    ),
-    _field(
-        "Robot",
-        "Masa y centro de masas",
-        "robot",
-        "com_height_m",
-        "Altura del CoM",
-        "m",
-    ),
+    _field("Robot", "Masa y centro de masas", "robot", "body_mass_kg", "Masa del cuerpo", "kg"),
+    _field("Robot", "Masa y centro de masas", "robot", "track_mass_kg", "Masa de cada oruga", "kg"),
+    _field("Robot", "Masa y centro de masas", "robot", "body_com_x_m", "CoM cuerpo · x", "m"),
+    _field("Robot", "Masa y centro de masas", "robot", "body_com_y_m", "CoM cuerpo · y", "m"),
+    _field("Robot", "Masa y centro de masas", "robot", "com_height_m", "Altura del CoM", "m"),
     # Robot · articulation
     _field("Robot", "Articulaciones", "robot", "q1_min_deg", "q1 mínimo", "deg"),
     _field("Robot", "Articulaciones", "robot", "q1_max_deg", "q1 máximo", "deg"),
@@ -137,178 +84,43 @@ FORM_FIELDS: tuple[ParameterField, ...] = (
     _field("Robot", "Articulaciones", "robot", "q1_nominal_deg", "q1 nominal", "deg"),
     _field("Robot", "Articulaciones", "robot", "q2_nominal_deg", "q2 nominal", "deg"),
     # Scenario
-    _field(
-        "Escenario",
-        "Corredor",
-        "scenario",
-        "open_width_m",
-        "Anchura fuera del hueco",
-        "m",
-    ),
-    _field(
-        "Escenario", "Corredor", "scenario", "gap_width_m", "Anchura del hueco", "m"
-    ),
+    _field("Escenario", "Corredor", "scenario", "open_width_m", "Anchura fuera del hueco", "m"),
+    _field("Escenario", "Corredor", "scenario", "gap_width_m", "Anchura del hueco", "m"),
     _field("Escenario", "Corredor", "scenario", "gap_start_m", "Inicio del hueco", "m"),
     _field("Escenario", "Corredor", "scenario", "gap_end_m", "Final del hueco", "m"),
-    _field(
-        "Escenario",
-        "Corredor",
-        "scenario",
-        "transition_length_m",
-        "Longitud de transición",
-        "m",
-    ),
+    _field("Escenario", "Corredor", "scenario", "transition_length_m", "Longitud de transición", "m"),
     _field("Escenario", "Corredor", "scenario", "centre_y_m", "Centro lateral", "m"),
     # Simulation
-    _field(
-        "Simulación",
-        "Tiempo y referencia",
-        "simulation",
-        "duration_s",
-        "Duración máxima",
-        "s",
-    ),
-    _field(
-        "Simulación",
-        "Tiempo y referencia",
-        "simulation",
-        "desired_speed_mps",
-        "Velocidad lineal deseada",
-        "m/s",
-    ),
-    _field(
-        "Simulación",
-        "Tiempo y referencia",
-        "simulation",
-        "desired_yaw_rate_rps",
-        "Velocidad angular deseada",
-        "rad/s",
-    ),
-    _field(
-        "Simulación",
-        "Tiempo y referencia",
-        "simulation",
-        "stop_x_m",
-        "Detener al alcanzar x",
-        "m",
-        "optional_float",
-    ),
-    _field(
-        "Simulación", "Estado inicial", "simulation", "initial_x_m", "x inicial", "m"
-    ),
-    _field(
-        "Simulación", "Estado inicial", "simulation", "initial_y_m", "y inicial", "m"
-    ),
-    _field(
-        "Simulación",
-        "Estado inicial",
-        "simulation",
-        "initial_yaw_deg",
-        "Yaw inicial",
-        "deg",
-    ),
-    _field(
-        "Simulación",
-        "Estado inicial",
-        "simulation",
-        "initial_q1_deg",
-        "q1 inicial",
-        "deg",
-    ),
-    _field(
-        "Simulación",
-        "Estado inicial",
-        "simulation",
-        "initial_q2_deg",
-        "q2 inicial",
-        "deg",
-    ),
-    _field(
-        "Simulación",
-        "Reproducibilidad",
-        "simulation",
-        "random_seed",
-        "Semilla aleatoria",
-        kind="int",
-    ),
+    _field("Simulación", "Tiempo y referencia", "simulation", "duration_s", "Duración máxima", "s"),
+    _field("Simulación", "Tiempo y referencia", "simulation", "desired_speed_mps", "Velocidad lineal deseada", "m/s"),
+    _field("Simulación", "Tiempo y referencia", "simulation", "desired_yaw_rate_rps", "Velocidad angular deseada", "rad/s"),
+    _field("Simulación", "Tiempo y referencia", "simulation", "stop_x_m", "Detener al alcanzar x", "m", "optional_float"),
+    _field("Simulación", "Estado inicial", "simulation", "initial_x_m", "x inicial", "m"),
+    _field("Simulación", "Estado inicial", "simulation", "initial_y_m", "y inicial", "m"),
+    _field("Simulación", "Estado inicial", "simulation", "initial_yaw_deg", "Yaw inicial", "deg"),
+    _field("Simulación", "Estado inicial", "simulation", "initial_q1_deg", "q1 inicial", "deg"),
+    _field("Simulación", "Estado inicial", "simulation", "initial_q2_deg", "q2 inicial", "deg"),
+    _field("Simulación", "Reproducibilidad", "simulation", "random_seed", "Semilla aleatoria", kind="int"),
     # MPC · horizon and costs
     _field("MPC", "Horizonte", "mpc", "sample_time_s", "Periodo de control", "s"),
-    _field(
-        "MPC", "Horizonte", "mpc", "horizon_steps", "Pasos del horizonte", kind="int"
-    ),
+    _field("MPC", "Horizonte", "mpc", "horizon_steps", "Pasos del horizonte", kind="int"),
     _field("MPC", "Costes de seguimiento", "mpc", "position_weight", "Posición"),
     _field("MPC", "Costes de seguimiento", "mpc", "heading_weight", "Orientación"),
-    _field(
-        "MPC", "Costes de seguimiento", "mpc", "velocity_weight", "Velocidad lineal"
-    ),
-    _field(
-        "MPC", "Costes de seguimiento", "mpc", "yaw_rate_weight", "Velocidad angular"
-    ),
-    _field(
-        "MPC",
-        "Costes de seguimiento",
-        "mpc",
-        "terminal_position_weight",
-        "Posición terminal",
-    ),
-    _field(
-        "MPC",
-        "Costes de seguimiento",
-        "mpc",
-        "terminal_heading_weight",
-        "Orientación terminal",
-    ),
-    _field(
-        "MPC",
-        "Forma del robot",
-        "mpc",
-        "parallelism_weight",
-        "Paralelismo entre orugas",
-    ),
+    _field("MPC", "Costes de seguimiento", "mpc", "velocity_weight", "Velocidad lineal"),
+    _field("MPC", "Costes de seguimiento", "mpc", "yaw_rate_weight", "Velocidad angular"),
+    _field("MPC", "Costes de seguimiento", "mpc", "terminal_position_weight", "Posición terminal"),
+    _field("MPC", "Costes de seguimiento", "mpc", "terminal_heading_weight", "Orientación terminal"),
+    _field("MPC", "Forma del robot", "mpc", "parallelism_weight", "Paralelismo entre orugas"),
     # MPC · constraints
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "clearance_margin_m",
-        "Margen contra paredes",
-        "m",
-    ),
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "body_speed_limit_mps",
-        "Velocidad máxima del cuerpo",
-        "m/s",
-    ),
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "body_yaw_rate_limit_rps",
-        "Yaw rate máximo del cuerpo",
-        "rad/s",
-    ),
-    _field(
-        "MPC",
-        "Restricciones",
-        "mpc",
-        "articulation_rate_limit_rps",
-        "Velocidad articular máxima",
-        "rad/s",
-    ),
+    _field("MPC", "Restricciones", "mpc", "clearance_margin_m", "Margen contra paredes", "m"),
+    _field("MPC", "Restricciones", "mpc", "body_speed_limit_mps", "Velocidad máxima del cuerpo", "m/s"),
+    _field("MPC", "Restricciones", "mpc", "body_yaw_rate_limit_rps", "Yaw rate máximo del cuerpo", "rad/s"),
+    _field("MPC", "Restricciones", "mpc", "articulation_rate_limit_rps", "Velocidad articular máxima", "rad/s"),
+    _field("MPC", "Restricciones", "mpc", "track_speed_limit_mps", "Velocidad máxima de oruga", "m/s"),
     # MPC · numerical model and solver
     _field("MPC", "Solver", "mpc", "regularisation", "Regularización"),
     _field("MPC", "Solver", "mpc", "smooth_epsilon", "Épsilon de suavizado"),
-    _field(
-        "MPC",
-        "Solver",
-        "mpc",
-        "ipopt_max_iterations",
-        "Iteraciones máximas IPOPT",
-        kind="int",
-    ),
+    _field("MPC", "Solver", "mpc", "ipopt_max_iterations", "Iteraciones máximas IPOPT", kind="int"),
     _field("MPC", "Solver", "mpc", "ipopt_tolerance", "Tolerancia IPOPT"),
 )
 
@@ -343,6 +155,7 @@ class ApplicationConfiguration:
             "mpc.body_speed_limit": p.body_speed_limit,
             "mpc.body_yaw_rate_limit": p.body_yaw_rate_limit,
             "mpc.articulation_rate_limit": p.articulation_rate_limit,
+            "mpc.track_speed_limit": p.track_speed_limit,
             "mpc.regularisation": p.regularisation,
             "mpc.smooth_epsilon": p.smooth_epsilon,
             "mpc.ipopt_tolerance": p.ipopt_tolerance,
@@ -357,9 +170,7 @@ class ApplicationConfiguration:
         if np.linalg.norm(r.pivot_positions[1] - r.pivot_positions[0]) <= 0.0:
             raise ConfigurationError("The two robot pivots must be different")
         if p.horizon_steps < 1 or p.ipopt_max_iterations < 1:
-            raise ConfigurationError(
-                "MPC horizon and solver iterations must be positive"
-            )
+            raise ConfigurationError("MPC horizon and solver iterations must be positive")
         if p.clearance_margin < 0.0:
             raise ConfigurationError("Clearance margin cannot be negative")
         if c.gap_width <= 2.0 * p.clearance_margin:
@@ -421,12 +232,6 @@ class ApplicationConfiguration:
                 raise ConfigurationError(f"{section}.{key} must be an integer")
             return int(value)
 
-        def boolean(section: str, key: str) -> bool:
-            value = required(section, key)
-            if not isinstance(value, bool):
-                raise ConfigurationError(f"{section}.{key} must be true or false")
-            return value
-
         def optional_number(section: str, key: str) -> float | None:
             value = required(section, key)
             if value is None or value == "":
@@ -444,14 +249,8 @@ class ApplicationConfiguration:
             ),
             track_center_offsets=np.array(
                 [
-                    [
-                        number("robot", "track_1_offset_x_m"),
-                        number("robot", "track_1_offset_y_m"),
-                    ],
-                    [
-                        number("robot", "track_2_offset_x_m"),
-                        number("robot", "track_2_offset_y_m"),
-                    ],
+                    [number("robot", "track_1_offset_x_m"), number("robot", "track_1_offset_y_m")],
+                    [number("robot", "track_2_offset_x_m"), number("robot", "track_2_offset_y_m")],
                 ],
                 dtype=float,
             ),
@@ -465,19 +264,10 @@ class ApplicationConfiguration:
                 dtype=float,
             ),
             com_height=number("robot", "com_height_m"),
-            q_min=deg(
-                np.array([number("robot", "q1_min_deg"), number("robot", "q2_min_deg")])
-            ),
-            q_max=deg(
-                np.array([number("robot", "q1_max_deg"), number("robot", "q2_max_deg")])
-            ),
+            q_min=deg(np.array([number("robot", "q1_min_deg"), number("robot", "q2_min_deg")])),
+            q_max=deg(np.array([number("robot", "q1_max_deg"), number("robot", "q2_max_deg")])),
             nominal_configuration=deg(
-                np.array(
-                    [
-                        number("robot", "q1_nominal_deg"),
-                        number("robot", "q2_nominal_deg"),
-                    ]
-                )
+                np.array([number("robot", "q1_nominal_deg"), number("robot", "q2_nominal_deg")])
             ),
         )
 
@@ -503,6 +293,11 @@ class ApplicationConfiguration:
             if "articulation_rate_limit_rps" in sections["mpc"]
             else MPCParameters().articulation_rate_limit
         )
+        track_speed_limit = (
+            p("track_speed_limit_mps")
+            if "track_speed_limit_mps" in sections["mpc"]
+            else MPCParameters().track_speed_limit
+        )
         mpc = MPCParameters(
             dt=p("sample_time_s"),
             horizon_steps=integer("mpc", "horizon_steps"),
@@ -517,6 +312,7 @@ class ApplicationConfiguration:
             body_speed_limit=p("body_speed_limit_mps"),
             body_yaw_rate_limit=p("body_yaw_rate_limit_rps"),
             articulation_rate_limit=articulation_rate_limit,
+            track_speed_limit=track_speed_limit,
             regularisation=p("regularisation"),
             smooth_epsilon=p("smooth_epsilon"),
             ipopt_max_iterations=integer("mpc", "ipopt_max_iterations"),
@@ -611,6 +407,7 @@ class ApplicationConfiguration:
                 "body_speed_limit_mps": float(p.body_speed_limit),
                 "body_yaw_rate_limit_rps": float(p.body_yaw_rate_limit),
                 "articulation_rate_limit_rps": float(p.articulation_rate_limit),
+                "track_speed_limit_mps": float(p.track_speed_limit),
                 "regularisation": float(p.regularisation),
                 "smooth_epsilon": float(p.smooth_epsilon),
                 "ipopt_max_iterations": int(p.ipopt_max_iterations),

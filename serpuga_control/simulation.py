@@ -19,7 +19,7 @@ from .trajectory import ReferenceTrajectory, wrapped_angle_error
 class TeleoperationCommand:
     """Legacy live body-twist request used only by the manual GUI mode.
 
-    The NMPC itself never uses a body-twist command.  Manual mode keeps the old
+    The NMPC itself never uses a body-twist command. Manual mode keeps the old
     three sliders for compatibility and allocates belt speeds on the current
     track axes without changing the articulation commands.
     """
@@ -63,6 +63,10 @@ class SimulationLog:
             self.states[:-1, 2] - self.reference_poses[:, 2]
         )
         slip_norm = np.linalg.norm(self.slips, axis=2)
+        initial_relative_angle = self.states[0, 3] - self.states[0, 4]
+        relative_angle_change = wrapped_angle_error(
+            (self.states[:, 3] - self.states[:, 4]) - initial_relative_angle
+        )
         return {
             "completed": self.completed,
             "position_rmse_m": float(np.sqrt(np.mean(position_error**2))),
@@ -77,8 +81,10 @@ class SimulationLog:
             "maximum_lateral_slip_mps": float(np.max(np.abs(self.slips[:, :, 1]))),
             "minimum_clearance_m": float(np.min(self.clearances)),
             "minimum_support_margin_m": float(np.min(self.stability_margins)),
+            # Relative articulation change between the two tracks, rather than
+            # the largest motion of either individual joint.
             "maximum_fold_deg": float(
-                np.max(np.abs(np.rad2deg(self.states[:, 3:5] - self.states[0, 3:5])))
+                np.max(np.abs(np.rad2deg(relative_angle_change)))
             ),
             "mean_solve_time_s": float(np.mean(self.solve_times)),
             "maximum_solve_time_s": float(np.max(self.solve_times)),
@@ -182,7 +188,8 @@ class ClosedLoopSession:
         for _ in range(self.mpc_parameters.horizon_steps):
             prediction_control = control.copy()
             prediction_twist = np.asarray(
-                self.model.body_twist(prediction_control), dtype=float
+                self.model.interval_body_twist(prediction_state, prediction_control),
+                dtype=float,
             ).reshape(3)
             prediction_state = np.asarray(
                 self.model.discrete_step(prediction_state, prediction_control),
@@ -191,7 +198,9 @@ class ClosedLoopSession:
             predicted_controls.append(prediction_control.copy())
             predicted_twists.append(prediction_twist.copy())
             predicted_states.append(prediction_state.copy())
-        body_twist = np.asarray(self.model.body_twist(control), dtype=float).reshape(3)
+        body_twist = np.asarray(
+            self.model.interval_body_twist(self.state, control), dtype=float
+        ).reshape(3)
         controls = np.asarray(predicted_controls, dtype=float).reshape((-1, 4))
         return NMPCSolution(
             success=True,
@@ -238,11 +247,11 @@ class ClosedLoopSession:
         twist = solution.body_twist.copy()
         actuator_command = solution.actuator_command.copy()
         world_velocity = np.asarray(
-            self.model.world_velocity_from_twist(self.state, twist), dtype=float
+            self.model.world_velocity(self.state, control), dtype=float
         ).reshape(2)
         slip = np.asarray(
             self.model.slip_components(self.state[3:5], control), dtype=float
-        )
+        ).reshape(2, 2)
         centre_of_mass = np.asarray(
             self.robot.centre_of_mass_world(self.state), dtype=float
         )

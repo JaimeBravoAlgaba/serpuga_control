@@ -54,6 +54,7 @@ mpc:
   body_speed_limit_mps: 0.65
   body_yaw_rate_limit_rps: 1.2
   articulation_rate_limit_rps: 1.5
+  track_speed_limit_mps: 0.65
   regularisation: 1.0e-7
   smooth_epsilon: 1.0e-3
   ipopt_max_iterations: 20

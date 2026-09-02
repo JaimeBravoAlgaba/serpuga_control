@@ -53,6 +53,18 @@ def test_articulation_rate_uses_commanded_q_directly() -> None:
     np.testing.assert_allclose(rates, (control[0:2] - q) / model.mpc_parameters.dt)
 
 
+def test_intermediate_state_interpolates_articulation() -> None:
+    model = make_model()
+    state = np.zeros(5)
+    control = np.array([-0.3, 0.3, 0.2, 0.2])
+
+    midpoint = model.intermediate_state(state, control, 0.5)
+    final = model.discrete_step(state, control)
+
+    np.testing.assert_allclose(midpoint[3:5], 0.5 * control[0:2])
+    np.testing.assert_allclose(final[3:5], control[0:2])
+
+
 def test_discrete_step_applies_q_commands_and_integrates_forward_motion() -> None:
     model = make_model()
     state = np.zeros(5)
@@ -66,10 +78,36 @@ def test_discrete_step_applies_q_commands_and_integrates_forward_motion() -> Non
     np.testing.assert_allclose(next_state[3:5], control[0:2])
 
 
-def test_incompatible_track_commands_have_nonzero_residual() -> None:
+def test_pose_integration_does_not_use_final_q_for_whole_interval() -> None:
     model = make_model()
+    state = np.zeros(5)
+    control = np.array([0.0, np.deg2rad(60.0), 0.3, 0.3])
+
+    integrated = model.discrete_step(state, control)
+    final_axis_twist = model.body_twist(control)
+    naive_y = model.mpc_parameters.dt * final_axis_twist[1]
+
+    assert not np.isclose(integrated[1], naive_y, atol=1e-5)
+
+
+def test_incompatible_track_commands_have_flat_residual_and_valid_slip() -> None:
+    model = make_model()
+    q = np.array([0.0, np.deg2rad(20.0)])
     control = np.array([0.0, np.deg2rad(45.0), 0.3, 0.3])
 
-    residual = model.pivot_residual_vectors(control)
+    residual = model.pivot_residual_vectors(control, q=q)
+    slip = model.slip_components(q, control)
 
+    assert residual.shape == (4,)
+    assert slip.shape == (2, 2)
+    assert np.all(np.isfinite(slip))
     assert np.max(np.abs(residual)) > 1e-3
+
+
+def test_slip_diagnostic_uses_actual_q_not_only_q_command() -> None:
+    model = make_model()
+    control = np.array([0.0, np.deg2rad(45.0), 0.3, 0.3])
+    slip_at_command = model.slip_components(control[0:2], control)
+    slip_before_command = model.slip_components(np.array([0.0, 0.0]), control)
+
+    assert not np.allclose(slip_at_command, slip_before_command)

@@ -22,17 +22,18 @@ def _small_log() -> SimulationLog:
         prediction = np.repeat(states[index : index + 1], 3, axis=0)
         prediction[:, 0] += np.arange(3) * 0.04
         predicted_states.append(prediction)
+    controls = np.column_stack(
+        (
+            states[:3, 3:5],
+            np.full(3, 0.27),
+            np.full(3, 0.27),
+        )
+    )
     return SimulationLog(
         times=times,
         states=states,
-        controls=np.zeros((3, 3), dtype=float),
-        actuator_commands=np.column_stack(
-            (
-                states[:3, 3:5],
-                np.full(3, 0.27),
-                np.full(3, 0.27),
-            )
-        ),
+        controls=controls.copy(),
+        actuator_commands=controls.copy(),
         reference_poses=reference_poses,
         reference_speeds=np.full(3, 0.27),
         reference_yaw_rates=np.zeros(3),
@@ -59,6 +60,9 @@ def test_live_player_navigation_and_screenshot(tmp_path) -> None:
         corridor=StraightGapCorridor(),
         mpc_parameters=parameters,
     )
+
+    assert "q1*,q2*" in player.telemetry_text.get_text()
+    assert "vx, vy    0.270,  0.000 m/s" in player.telemetry_text.get_text()
 
     player._on_timer()
     assert player.playback.index == 1
