@@ -40,7 +40,7 @@ def has_interactive_backend() -> bool:
 class LiveSimulationPlayer:
     """Matplotlib player with real-time pacing and frame navigation.
 
-    The NMPC result is replayed at the controller sampling period.  Because the
+    The NMPC result is replayed at the controller sampling period. Because the
     full history is retained, the user can pause and inspect adjacent frames
     without recomputing the optimisation.
     """
@@ -179,18 +179,10 @@ class LiveSimulationPlayer:
 
         wall_x, upper_wall, lower_wall = self.corridor.wall_profiles(x_min, x_max)
         self.scene.fill_between(
-            wall_x,
-            upper_wall,
-            y_max,
-            color=COLOURS["wall"],
-            zorder=0,
+            wall_x, upper_wall, y_max, color=COLOURS["wall"], zorder=0
         )
         self.scene.fill_between(
-            wall_x,
-            y_min,
-            lower_wall,
-            color=COLOURS["wall"],
-            zorder=0,
+            wall_x, y_min, lower_wall, color=COLOURS["wall"], zorder=0
         )
         self.scene.plot(wall_x, upper_wall, color=COLOURS["ink"], linewidth=1.3)
         self.scene.plot(wall_x, lower_wall, color=COLOURS["ink"], linewidth=1.3)
@@ -210,22 +202,12 @@ class LiveSimulationPlayer:
             label="Referencia",
         )
         (self.executed_path,) = self.scene.plot(
-            [],
-            [],
-            color=COLOURS["teal_dark"],
-            linewidth=2.5,
-            label="Trayectoria ejecutada",
-            zorder=3,
+            [], [], color=COLOURS["teal_dark"], linewidth=2.5,
+            label="Trayectoria ejecutada", zorder=3,
         )
         (self.predicted_path,) = self.scene.plot(
-            [],
-            [],
-            color=COLOURS["violet"],
-            linewidth=1.4,
-            linestyle="--",
-            alpha=0.9,
-            label="Horizonte MPC",
-            zorder=3,
+            [], [], color=COLOURS["violet"], linewidth=1.4,
+            linestyle="--", alpha=0.9, label="Horizonte MPC", zorder=3,
         )
 
         initial_state = self.log.states[0]
@@ -253,36 +235,18 @@ class LiveSimulationPlayer:
             self.scene.add_patch(patch)
             self.track_patches.append(patch)
             (direction_line,) = self.scene.plot(
-                [],
-                [],
-                color=COLOURS["white"],
-                linewidth=2.0,
-                marker=">",
-                markevery=[1],
-                markersize=6,
-                zorder=8,
+                [], [], color=COLOURS["white"], linewidth=2.0,
+                marker=">", markevery=[1], markersize=6, zorder=8,
             )
             self.direction_lines.append(direction_line)
 
         (self.body_marker,) = self.scene.plot(
-            [],
-            [],
-            marker="o",
-            markersize=4,
-            color=COLOURS["ink"],
-            linestyle="none",
-            zorder=9,
+            [], [], marker="o", markersize=4, color=COLOURS["ink"],
+            linestyle="none", zorder=9,
         )
         (self.com_marker,) = self.scene.plot(
-            [],
-            [],
-            marker="x",
-            markersize=7,
-            markeredgewidth=1.8,
-            color=COLOURS["amber"],
-            linestyle="none",
-            label="Centro de masa",
-            zorder=9,
+            [], [], marker="x", markersize=7, markeredgewidth=1.8,
+            color=COLOURS["amber"], linestyle="none", label="Centro de masa", zorder=9,
         )
         self.telemetry_text = self.scene.text(
             0.025,
@@ -303,9 +267,7 @@ class LiveSimulationPlayer:
             zorder=12,
         )
 
-        self.scene.set_title(
-            "Vista superior · estado actual", loc="left", color=COLOURS["ink"]
-        )
+        self.scene.set_title("Vista superior · estado actual", loc="left", color=COLOURS["ink"])
         self.scene.set_xlabel("x [m]", color=COLOURS["muted"])
         self.scene.set_ylabel("y [m]", color=COLOURS["muted"])
         self.scene.set_xlim(x_min, x_max)
@@ -313,11 +275,8 @@ class LiveSimulationPlayer:
         self.scene.set_aspect("equal", adjustable="box")
         self._style_axis(self.scene)
         self.scene.legend(
-            loc="lower center",
-            bbox_to_anchor=(0.5, -0.24),
-            ncol=4,
-            frameon=False,
-            fontsize=8,
+            loc="lower center", bbox_to_anchor=(0.5, -0.24), ncol=4,
+            frameon=False, fontsize=8,
         )
 
     def _build_configuration_plot(self) -> None:
@@ -327,9 +286,7 @@ class LiveSimulationPlayer:
         (self.q2_line,) = self.configuration.plot(
             [], [], color=COLOURS["violet"], linewidth=2.0, label=r"$q_2$"
         )
-        self.configuration.set_title(
-            "Configuración y anchura", loc="left", color=COLOURS["ink"]
-        )
+        self.configuration.set_title("Configuración y anchura", loc="left", color=COLOURS["ink"])
         self.configuration.set_ylabel("Ángulo [deg]", color=COLOURS["muted"])
         self.configuration.set_xlim(0.0, max(self.dt, self._state_times[-1]))
         q_degrees = np.rad2deg(self.log.states[:, 3:5])
@@ -341,19 +298,10 @@ class LiveSimulationPlayer:
         self._style_axis(self.configuration)
         self.width_axis = self.configuration.twinx()
         (self.robot_width_line,) = self.width_axis.plot(
-            [],
-            [],
-            color=COLOURS["ink"],
-            linewidth=1.3,
-            linestyle="--",
-            label="Robot",
+            [], [], color=COLOURS["ink"], linewidth=1.3, linestyle="--", label="Robot"
         )
         (self.corridor_width_line,) = self.width_axis.plot(
-            [],
-            [],
-            color=COLOURS["amber"],
-            linewidth=1.6,
-            label="Corredor",
+            [], [], color=COLOURS["amber"], linewidth=1.6, label="Corredor"
         )
         maximum_width = max(
             float(np.max(self.log.robot_widths)),
@@ -368,12 +316,8 @@ class LiveSimulationPlayer:
         handles_a, labels_a = self.configuration.get_legend_handles_labels()
         handles_b, labels_b = self.width_axis.get_legend_handles_labels()
         self.configuration.legend(
-            handles_a + handles_b,
-            labels_a + labels_b,
-            loc="lower left",
-            ncol=2,
-            frameon=False,
-            fontsize=7.5,
+            handles_a + handles_b, labels_a + labels_b, loc="lower left",
+            ncol=2, frameon=False, fontsize=7.5,
         )
 
     def _build_tracking_plot(self) -> None:
@@ -388,9 +332,7 @@ class LiveSimulationPlayer:
         (self.speed_line,) = self.tracking.plot(
             [], [], color=COLOURS["teal_dark"], linewidth=2.0, label=r"$v$"
         )
-        self.tracking.set_title(
-            "Seguimiento de velocidad", loc="left", color=COLOURS["ink"]
-        )
+        self.tracking.set_title("Seguimiento de velocidad", loc="left", color=COLOURS["ink"])
         self.tracking.set_ylabel("v [m/s]", color=COLOURS["muted"])
         self.tracking.set_xlim(0.0, max(self.dt, self._state_times[-1]))
         speed_values = np.concatenate((self.log.reference_speeds, self._forward_speed))
@@ -428,12 +370,8 @@ class LiveSimulationPlayer:
         handles_a, labels_a = self.tracking.get_legend_handles_labels()
         handles_b, labels_b = self.yaw_axis.get_legend_handles_labels()
         self.tracking.legend(
-            handles_a + handles_b,
-            labels_a + labels_b,
-            loc="lower right",
-            ncol=2,
-            frameon=False,
-            fontsize=7.5,
+            handles_a + handles_b, labels_a + labels_b, loc="lower right",
+            ncol=2, frameon=False, fontsize=7.5,
         )
 
     def _build_diagnostics_plot(self) -> None:
@@ -447,19 +385,12 @@ class LiveSimulationPlayer:
             [], [], color=COLOURS["amber"], linewidth=2.0, label="Margen soporte"
         )
         (self.clearance_line,) = self.diagnostics.plot(
-            [],
-            [],
-            color=COLOURS["ink"],
-            linewidth=1.3,
-            linestyle="--",
-            label="Clearance",
+            [], [], color=COLOURS["ink"], linewidth=1.3,
+            linestyle="--", label="Clearance",
         )
         self.diagnostics.axhline(
-            0.0,
-            color=COLOURS["red"],
-            linewidth=1.0,
-            linestyle=":",
-            label="Límite del soporte",
+            0.0, color=COLOURS["red"], linewidth=1.0,
+            linestyle=":", label="Límite del soporte",
         )
         diagnostic_values = np.concatenate(
             (
@@ -474,9 +405,7 @@ class LiveSimulationPlayer:
             min(-0.01, float(np.min(diagnostic_values))), diagnostic_maximum
         )
         self.diagnostics.set_xlim(0.0, max(self.dt, self._state_times[-1]))
-        self.diagnostics.set_title(
-            "Diagnósticos (no restringidos)", loc="left", color=COLOURS["ink"]
-        )
+        self.diagnostics.set_title("Diagnósticos (no restringidos)", loc="left", color=COLOURS["ink"])
         self.diagnostics.set_xlabel("Tiempo [s]", color=COLOURS["muted"])
         self.diagnostics.set_ylabel("m o m/s", color=COLOURS["muted"])
         self._style_axis(self.diagnostics)
@@ -484,13 +413,8 @@ class LiveSimulationPlayer:
             0.0, color=COLOURS["muted"], linewidth=0.9, alpha=0.65
         )
         self.diagnostics.legend(
-            loc="upper center",
-            bbox_to_anchor=(0.5, 1.02),
-            ncol=3,
-            frameon=False,
-            fontsize=7,
-            handlelength=2.0,
-            columnspacing=0.9,
+            loc="upper center", bbox_to_anchor=(0.5, 1.02), ncol=3,
+            frameon=False, fontsize=7, handlelength=2.0, columnspacing=0.9,
         )
 
     def _build_controls(self) -> None:
@@ -499,16 +423,11 @@ class LiveSimulationPlayer:
         self.progress_axis.set_ylim(0.0, 1.0)
         self.progress_axis.axis("off")
         self.progress_axis.add_patch(
-            Rectangle(
-                (0.0, 0.16), 1.0, 0.68, facecolor=COLOURS["grid"], edgecolor="none"
-            )
+            Rectangle((0.0, 0.16), 1.0, 0.68, facecolor=COLOURS["grid"], edgecolor="none")
         )
         self.progress_patch = Rectangle(
-            (0.0, 0.16),
-            0.0,
-            0.68,
-            facecolor=COLOURS["teal_dark"],
-            edgecolor="none",
+            (0.0, 0.16), 0.0, 0.68,
+            facecolor=COLOURS["teal_dark"], edgecolor="none",
         )
         self.progress_axis.add_patch(self.progress_patch)
 
@@ -525,30 +444,16 @@ class LiveSimulationPlayer:
             [start_x + button_width + gap, button_y, button_width, button_height]
         )
         self.forward_axis = self.figure.add_axes(
-            [
-                start_x + 2.0 * (button_width + gap),
-                button_y,
-                button_width,
-                button_height,
-            ]
+            [start_x + 2.0 * (button_width + gap), button_y, button_width, button_height]
         )
         self.backward_button = Button(
-            self.backward_axis,
-            "Paso atrás",
-            color=COLOURS["white"],
-            hovercolor=COLOURS["wall"],
+            self.backward_axis, "Paso atrás", color=COLOURS["white"], hovercolor=COLOURS["wall"]
         )
         self.play_button = Button(
-            self.play_axis,
-            "Pausa",
-            color=COLOURS["teal_dark"],
-            hovercolor=COLOURS["teal"],
+            self.play_axis, "Pausa", color=COLOURS["teal_dark"], hovercolor=COLOURS["teal"]
         )
         self.forward_button = Button(
-            self.forward_axis,
-            "Paso adelante",
-            color=COLOURS["white"],
-            hovercolor=COLOURS["wall"],
+            self.forward_axis, "Paso adelante", color=COLOURS["white"], hovercolor=COLOURS["wall"]
         )
         self.play_button.label.set_color(COLOURS["white"])
         for button in (self.backward_button, self.play_button, self.forward_button):
@@ -561,13 +466,8 @@ class LiveSimulationPlayer:
         self.play_button.on_clicked(self._on_toggle)
         self.forward_button.on_clicked(self._on_forward)
         self.figure.text(
-            0.97,
-            0.081,
-            "Teclado: espacio · ← · →",
-            ha="right",
-            va="center",
-            fontsize=8.5,
-            color=COLOURS["muted"],
+            0.97, 0.081, "Teclado: espacio · ← · →", ha="right", va="center",
+            fontsize=8.5, color=COLOURS["muted"],
         )
 
     def _track_direction_segment(
@@ -578,17 +478,14 @@ class LiveSimulationPlayer:
     ) -> tuple[np.ndarray, np.ndarray]:
         yaw = state[2]
         rotation = np.array(
-            [[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]],
-            dtype=float,
+            [[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]], dtype=float
         )
         centre_body = np.asarray(
-            self.robot.track_center_body(state[3 + track_index], track_index),
-            dtype=float,
+            self.robot.track_center_body(state[3 + track_index], track_index), dtype=float
         )
         centre_world = state[0:2] + rotation @ centre_body
         local_direction = np.array(
-            [np.cos(state[3 + track_index]), np.sin(state[3 + track_index])],
-            dtype=float,
+            [np.cos(state[3 + track_index]), np.sin(state[3 + track_index])], dtype=float
         )
         direction_sign = -1.0 if track_speed < 0.0 else 1.0
         end_world = centre_world + 0.13 * direction_sign * (rotation @ local_direction)
@@ -600,15 +497,15 @@ class LiveSimulationPlayer:
         current_time = self._state_times[index]
         telemetry_index = min(index, self.log.times.size - 1)
         measurement_stop = min(index + 1, self.log.times.size)
+        current_control = self.log.controls[telemetry_index]
         track_speeds = (
-            self.log.actuator_commands[telemetry_index, 2:4]
-            if self.log.actuator_commands.size
+            current_control[2:4]
+            if self.log.controls.size
             else np.ones(2, dtype=float)
         )
 
         self.executed_path.set_data(
-            self.log.states[: index + 1, 0],
-            self.log.states[: index + 1, 1],
+            self.log.states[: index + 1, 0], self.log.states[: index + 1, 1]
         )
         if index < len(self.log.predicted_states):
             prediction = self.log.predicted_states[index]
@@ -621,14 +518,10 @@ class LiveSimulationPlayer:
         )
         for track_index, patch in enumerate(self.track_patches):
             patch.set_xy(
-                np.asarray(
-                    self.robot.track_vertices_world(state, track_index), dtype=float
-                )
+                np.asarray(self.robot.track_vertices_world(state, track_index), dtype=float)
             )
             start, end = self._track_direction_segment(
-                state,
-                track_index,
-                float(track_speeds[track_index]),
+                state, track_index, float(track_speeds[track_index])
             )
             self.direction_lines[track_index].set_data(
                 [start[0], end[0]], [start[1], end[1]]
@@ -644,30 +537,14 @@ class LiveSimulationPlayer:
             self._state_times[: index + 1], np.rad2deg(self.log.states[: index + 1, 4])
         )
         measurement_times = self.log.times[:measurement_stop]
-        self.robot_width_line.set_data(
-            measurement_times, self.log.robot_widths[:measurement_stop]
-        )
-        self.corridor_width_line.set_data(
-            measurement_times, self.log.corridor_widths[:measurement_stop]
-        )
-        self.speed_line.set_data(
-            measurement_times, self._forward_speed[:measurement_stop]
-        )
-        self.yaw_rate_line.set_data(
-            measurement_times, self.log.body_twists[:measurement_stop, 2]
-        )
-        self.slip1_line.set_data(
-            measurement_times, self._slip_magnitude[:measurement_stop, 0]
-        )
-        self.slip2_line.set_data(
-            measurement_times, self._slip_magnitude[:measurement_stop, 1]
-        )
-        self.stability_line.set_data(
-            measurement_times, self.log.stability_margins[:measurement_stop]
-        )
-        self.clearance_line.set_data(
-            measurement_times, self.log.clearances[:measurement_stop]
-        )
+        self.robot_width_line.set_data(measurement_times, self.log.robot_widths[:measurement_stop])
+        self.corridor_width_line.set_data(measurement_times, self.log.corridor_widths[:measurement_stop])
+        self.speed_line.set_data(measurement_times, self._forward_speed[:measurement_stop])
+        self.yaw_rate_line.set_data(measurement_times, self.log.body_twists[:measurement_stop, 2])
+        self.slip1_line.set_data(measurement_times, self._slip_magnitude[:measurement_stop, 0])
+        self.slip2_line.set_data(measurement_times, self._slip_magnitude[:measurement_stop, 1])
+        self.stability_line.set_data(measurement_times, self.log.stability_margins[:measurement_stop])
+        self.clearance_line.set_data(measurement_times, self.log.clearances[:measurement_stop])
         for cursor in (
             self.configuration_cursor,
             self.tracking_cursor,
@@ -676,20 +553,22 @@ class LiveSimulationPlayer:
             cursor.set_xdata([current_time, current_time])
 
         q_degrees = np.rad2deg(state[3:5])
+        q_command_degrees = np.rad2deg(current_control[0:2])
         slip_values = self._slip_magnitude[telemetry_index]
+        body_twist = self.log.body_twists[telemetry_index]
         self.telemetry_text.set_text(
-            f"vx, vy   {self.log.controls[telemetry_index, 0]: .3f}, "
-            f"{self.log.controls[telemetry_index, 1]: .3f} m/s\n"
-            f"v1, v2  {track_speeds[0]: .3f}, {track_speeds[1]: .3f} m/s\n"
-            f"v       {self._forward_speed[telemetry_index]: .3f} / "
+            f"vx, vy   {body_twist[0]: .3f}, {body_twist[1]: .3f} m/s\n"
+            f"v1, v2   {track_speeds[0]: .3f}, {track_speeds[1]: .3f} m/s\n"
+            f"q1*,q2*  {q_command_degrees[0]: .1f}, {q_command_degrees[1]: .1f} deg\n"
+            f"v        {self._forward_speed[telemetry_index]: .3f} / "
             f"{self.log.reference_speeds[telemetry_index]:.3f} m/s\n"
-            f"omega   {self.log.body_twists[telemetry_index, 2]: .3f} / "
+            f"omega    {body_twist[2]: .3f} / "
             f"{self.log.reference_yaw_rates[telemetry_index]:.3f} rad/s\n"
-            f"q1, q2  {q_degrees[0]: .1f}, {q_degrees[1]: .1f} deg\n"
-            f"ancho   {self.log.robot_widths[telemetry_index]: .3f} / "
+            f"q1, q2   {q_degrees[0]: .1f}, {q_degrees[1]: .1f} deg\n"
+            f"ancho    {self.log.robot_widths[telemetry_index]: .3f} / "
             f"{self.log.corridor_widths[telemetry_index]:.3f} m\n"
-            f"slip    {slip_values[0]: .3f}, {slip_values[1]:.3f} m/s\n"
-            f"soporte {self.log.stability_margins[telemetry_index]: .3f} m   "
+            f"slip     {slip_values[0]: .3f}, {slip_values[1]:.3f} m/s\n"
+            f"soporte  {self.log.stability_margins[telemetry_index]: .3f} m   "
             f"clear {self.log.clearances[telemetry_index]:.3f} m"
         )
 
