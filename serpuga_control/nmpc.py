@@ -11,7 +11,7 @@ import numpy as np
 from .config import MPCParameters
 from .corridor import StraightGapCorridor
 from .kinematics import KinematicModel
-from .math_utils import J2_NUMPY, smooth_minimum
+from .math_utils import J2_NUMPY
 from .robot import RobotDescription
 from .trajectory import ReferencePreview
 
@@ -21,9 +21,9 @@ class NMPCSolution:
     success: bool
     # Public MPC output: [q1_cmd, q2_cmd, v1, v2].
     control: np.ndarray
-    # Derived rigid-body twist [v_x, v_y, omega].
+    # Representative midpoint rigid-body twist [v_x, v_y, omega].
     body_twist: np.ndarray
-    # Kept as an explicit alias for downstream actuator interfaces.
+    # Explicit alias for downstream actuator interfaces.
     actuator_command: np.ndarray
     predicted_states: np.ndarray
     predicted_controls: np.ndarray
@@ -96,7 +96,8 @@ class NMPCController:
         for step in range(n):
             state = self.states[:, step]
             control = self.controls[:, step]
-            twist = self.model.body_twist(control)
+            q_mid = self.model.interval_axes(state[3:5], control, 0.5)
+            twist = self.model.interval_body_twist(state, control)
             q_rates = self.model.articulation_rates(state[3:5], control)
 
             self.opti.subject_to(
@@ -128,7 +129,7 @@ class NMPCController:
             heading_error = state[2] - desired_heading
             velocity_error = world_velocity - desired_world_velocity
             yaw_rate_error = twist[2] - self.reference_yaw_rates[0, step]
-            parallelism_error = self.robot.parallelism_residual(control[0:2])
+            parallelism_error = self.robot.parallelism_residual(q_mid)
 
             objective += p.position_weight * ca.sumsqr(position_error)
             objective += p.heading_weight * 2.0 * (1.0 - ca.cos(heading_error))
@@ -136,18 +137,10 @@ class NMPCController:
             objective += p.yaw_rate_weight * yaw_rate_error**2
             objective += p.parallelism_weight * parallelism_error**2
 
-            self._add_width_constraint(
-                state,
-                self.reference_poses[0:2, step],
-                self.reference_poses[2, step],
-            )
+            self._add_corridor_constraint(state)
 
         terminal_state = self.states[:, n]
-        self._add_width_constraint(
-            terminal_state,
-            self.reference_poses[0:2, n],
-            self.reference_poses[2, n],
-        )
+        self._add_corridor_constraint(terminal_state)
         terminal_position_error = terminal_state[0:2] - self.reference_poses[0:2, n]
         terminal_heading_error = terminal_state[2] - self.reference_poses[2, n]
         objective += p.terminal_position_weight * ca.sumsqr(terminal_position_error)
@@ -182,28 +175,15 @@ class NMPCController:
         }
         self.opti.solver("ipopt", plugin_options, solver_options)
 
-    def _add_width_constraint(
-        self,
-        state: ca.MX,
-        path_position: ca.MX,
-        path_heading: ca.MX,
-    ) -> None:
-        path_normal = ca.vertcat(-ca.sin(path_heading), ca.cos(path_heading))
-        robot_width = self.robot.centred_envelope_width_expression(
-            state,
-            path_position,
-            path_normal,
-            self.parameters.smooth_epsilon,
+    def _add_corridor_constraint(self, state: ca.MX) -> None:
+        """Impose one smooth inequality against the physical corridor walls."""
+
+        residual = self.corridor.clearance_residual(
+            self.robot.footprint_vertices_world(state),
+            margin=self.parameters.clearance_margin,
+            epsilon=self.parameters.smooth_epsilon,
         )
-        footprint_widths = [
-            self.corridor.full_width(vertex[0])
-            for vertex in self.robot.footprint_vertices_world(state)
-        ]
-        available_width = (
-            smooth_minimum(footprint_widths, self.parameters.smooth_epsilon)
-            - 2.0 * self.parameters.clearance_margin
-        )
-        self.opti.subject_to(robot_width <= available_width)
+        self.opti.subject_to(residual <= 0.0)
 
     def _set_parameters(self, state: np.ndarray, preview: ReferencePreview) -> None:
         self.opti.set_value(self.initial_state, state)
@@ -279,7 +259,8 @@ class NMPCController:
             control_guess = np.column_stack(
                 (self._last_controls[:, 1:], self._last_controls[:, -1])
             )
-            # First q command must remain reachable from the measured q.
+            # The shifted sequence preserves all previous inter-step rate bounds;
+            # only its first q command must be re-anchored to the measured q.
             delta = np.clip(
                 control_guess[0:2, 0] - state[3:5],
                 -self.parameters.articulation_rate_limit * self.parameters.dt,
@@ -304,32 +285,27 @@ class NMPCController:
             ).reshape(self.state_dimension)
         return states
 
-    def _evaluate_twists(self, controls: np.ndarray) -> np.ndarray:
+    def _evaluate_twists(
+        self, states: np.ndarray, controls: np.ndarray
+    ) -> np.ndarray:
         return np.column_stack(
             [
-                np.asarray(self.model.body_twist(controls[:, step]), dtype=float).reshape(3)
+                np.asarray(
+                    self.model.interval_body_twist(states[:, step], controls[:, step]),
+                    dtype=float,
+                ).reshape(3)
                 for step in range(controls.shape[1])
             ]
         )
 
-    def _numeric_width_residual(
-        self, state: np.ndarray, reference_pose: np.ndarray
-    ) -> float:
-        heading = float(reference_pose[2])
-        normal = np.array([-np.sin(heading), np.cos(heading)], dtype=float)
-        required = float(
-            self.robot.centred_envelope_width_expression(
-                state,
-                reference_pose[0:2],
-                normal,
-                self.parameters.smooth_epsilon,
+    def _numeric_corridor_residual(self, state: np.ndarray) -> float:
+        return float(
+            self.corridor.clearance_residual(
+                self.robot.footprint_vertices_world(state),
+                margin=self.parameters.clearance_margin,
+                epsilon=self.parameters.smooth_epsilon,
             )
         )
-        available = min(
-            float(self.corridor.full_width(vertex[0]))
-            for vertex in self.robot.footprint_vertices_world(state)
-        ) - 2.0 * self.parameters.clearance_margin
-        return required - available
 
     def _guess_is_feasible(
         self,
@@ -337,6 +313,7 @@ class NMPCController:
         controls: np.ndarray,
         preview: ReferencePreview,
     ) -> bool:
+        del preview  # Feasibility is now referenced to physical corridor geometry.
         p = self.parameters
         r = self.robot.parameters
         tolerance = max(10.0 * p.ipopt_tolerance, 1.0e-6)
@@ -357,15 +334,17 @@ class NMPCController:
         if np.any(np.abs(q_rates) > p.articulation_rate_limit + tolerance):
             return False
 
-        twists = self._evaluate_twists(controls)
-        if np.any(np.linalg.norm(twists[0:2, :], axis=0) > p.body_speed_limit + tolerance):
+        twists = self._evaluate_twists(states, controls)
+        if np.any(
+            np.linalg.norm(twists[0:2, :], axis=0)
+            > p.body_speed_limit + tolerance
+        ):
             return False
         if np.any(np.abs(twists[2, :]) > p.body_yaw_rate_limit + tolerance):
             return False
 
         for step in range(states.shape[1]):
-            buffer = 0.0 if step == 0 else 2.0 * p.smooth_epsilon
-            if self._numeric_width_residual(states[:, step], preview.poses[step]) > -buffer + tolerance:
+            if self._numeric_corridor_residual(states[:, step]) > tolerance:
                 return False
         return True
 
@@ -378,7 +357,8 @@ class NMPCController:
         status: str,
         objective: float,
     ) -> NMPCSolution:
-        twists = self._evaluate_twists(controls)
+        del preview
+        twists = self._evaluate_twists(states, controls)
         self._last_states = states
         self._last_controls = controls
         return NMPCSolution(
@@ -419,31 +399,6 @@ class NMPCController:
             elapsed,
             f"{status} (feasible actuator fallback)",
             objective,
-        )
-
-    def _successful_solution(
-        self,
-        solution: ca.OptiSol,
-        elapsed: float,
-        *,
-        retried: bool = False,
-    ) -> NMPCSolution:
-        states = np.asarray(solution.value(self.states), dtype=float)
-        controls = np.asarray(solution.value(self.controls), dtype=float)
-        status = str(self.opti.stats().get("return_status", "Solve_Succeeded"))
-        if retried:
-            status = f"{status} (fresh-start retry)"
-        return self._solution_from_arrays(
-            ReferencePreview(
-                poses=np.asarray(solution.value(self.reference_poses), dtype=float).T,
-                speeds=np.asarray(solution.value(self.reference_speeds), dtype=float).reshape(-1),
-                yaw_rates=np.asarray(solution.value(self.reference_yaw_rates), dtype=float).reshape(-1),
-            ),
-            states,
-            controls,
-            elapsed,
-            status,
-            float(solution.value(self.objective_expression)),
         )
 
     def solve(self, state: np.ndarray, preview: ReferencePreview) -> NMPCSolution:
@@ -499,7 +454,10 @@ class NMPCController:
                 )
             except RuntimeError as retry_error:
                 status = str(self.opti.stats().get("return_status", "Solve_Failed"))
-                headline = str(retry_error).splitlines()[0] or str(first_error).splitlines()[0]
+                headline = (
+                    str(retry_error).splitlines()[0]
+                    or str(first_error).splitlines()[0]
+                )
 
             if self._guess_is_feasible(state_guess, control_guess, preview):
                 return self._fallback_solution(
@@ -512,14 +470,15 @@ class NMPCController:
 
             self._last_states = None
             self._last_controls = None
+            zero_control = np.r_[state[3:5], np.zeros(2, dtype=float)]
             return NMPCSolution(
                 success=False,
-                control=np.r_[state[3:5], np.zeros(2, dtype=float)],
+                control=zero_control.copy(),
                 body_twist=np.zeros(3, dtype=float),
-                actuator_command=np.r_[state[3:5], np.zeros(2, dtype=float)],
+                actuator_command=zero_control.copy(),
                 predicted_states=state_guess.T,
                 predicted_controls=control_guess.T,
-                predicted_twists=self._evaluate_twists(control_guess).T,
+                predicted_twists=self._evaluate_twists(state_guess, control_guess).T,
                 predicted_actuator_commands=control_guess.T.copy(),
                 objective=float("nan"),
                 solve_time=perf_counter() - start,
