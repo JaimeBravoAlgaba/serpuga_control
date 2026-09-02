@@ -9,7 +9,11 @@ from serpuga_control import (
 from serpuga_control.config import SimulationParameters
 from serpuga_control.corridor import StraightGapCorridor
 from serpuga_control.nmpc import NMPCController
-from serpuga_control.simulation import ClosedLoopSession, TeleoperationCommand
+from serpuga_control.simulation import (
+    ClosedLoopSession,
+    SimulationLog,
+    TeleoperationCommand,
+)
 from serpuga_control.trajectory import ReferenceTrajectory
 
 
@@ -52,6 +56,8 @@ def test_closed_loop_session_advances_one_mpc_step_at_a_time() -> None:
     assert first_log.states.shape == (2, 5)
     assert first_log.states[-1, 0] > 0.0
     np.testing.assert_allclose(first_log.controls, first_log.actuator_commands)
+    assert first_log.slips.shape == (1, 2, 2)
+    assert np.all(np.isfinite(first_log.slips))
     assert not session.finished
 
     assert session.step()
@@ -75,9 +81,39 @@ def test_closed_loop_session_can_step_from_legacy_manual_teleoperation() -> None
     assert log.controls.shape == (1, 4)
     np.testing.assert_allclose(log.controls, log.actuator_commands)
     assert np.max(np.abs(log.controls[0, 2:4])) <= parameters.track_speed_limit
-    # Legacy manual mode keeps the current articulation and allocates only belts.
     np.testing.assert_allclose(log.states[-1, 3:5], log.states[0, 3:5])
     assert log.predicted_states[-1].shape == (parameters.horizon_steps + 1, 5)
 
     assert session.step(command, stop_when_complete=False)
     assert not session.finished
+
+
+def test_summary_fold_metric_uses_relative_articulation() -> None:
+    dt = 0.1
+    states = np.zeros((3, 5), dtype=float)
+    states[1, 3:5] = [-0.1, 0.1]
+    states[2, 3:5] = [-0.2, 0.2]
+    log = SimulationLog(
+        times=np.array([0.0, dt]),
+        controls=np.zeros((2, 4)),
+        actuator_commands=np.zeros((2, 4)),
+        states=states,
+        reference_poses=np.zeros((2, 3)),
+        reference_speeds=np.zeros(2),
+        reference_yaw_rates=np.zeros(2),
+        body_twists=np.zeros((2, 3)),
+        world_velocities=np.zeros((2, 2)),
+        slips=np.zeros((2, 2, 2)),
+        stability_margins=np.ones(2),
+        clearances=np.ones(2),
+        robot_widths=np.ones(2),
+        corridor_widths=np.ones(2),
+        solve_times=np.ones(2) * 0.01,
+        objectives=np.zeros(2),
+        solver_statuses=["ok", "ok"],
+        predicted_states=[],
+        completed=True,
+    )
+
+    expected = np.rad2deg(0.4)
+    assert np.isclose(log.summary()["maximum_fold_deg"], expected)
