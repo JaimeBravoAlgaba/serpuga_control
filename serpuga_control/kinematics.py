@@ -17,15 +17,10 @@ from .robot import RobotDescription
 class KinematicModel:
     """Kinematics driven directly by ``[q1_cmd, q2_cmd, v1, v2]``.
 
-    The two articulation commands are position targets for the end of the
-    control interval.  During the interval the model interpolates the actual
-    track angles linearly from the measured state to those targets.  Belt
-    speeds are held constant over the interval.
-
-    For a given pair of instantaneous track angles, the signed belt speeds
-    define desired velocities at the two pivots.  A regularised least-squares
-    solve returns the rigid-body twist that best matches those four scalar
-    equations.
+    The articulation commands are position targets for the end of the control
+    interval. During the interval the actual track angles are interpolated
+    linearly from the measured state to those targets, while belt speeds are
+    held constant.
     """
 
     robot: RobotDescription
@@ -95,13 +90,7 @@ class KinematicModel:
         return np.linalg.solve(normal, a_np.T @ desired)
 
     def body_twist(self, control: Any, q: Any | None = None) -> Any:
-        """Return the twist for ``control`` at the supplied actual track angles.
-
-        ``q`` defaults to the commanded angles for convenience when evaluating
-        a steady actuator command.  Prediction and simulation pass the actual
-        state angles explicitly so steering motion is not treated as
-        instantaneous.
-        """
+        """Return the twist for ``control`` at the supplied actual track angles."""
 
         axes = control[0:2] if q is None else q
         return self.body_twist_from_axes(axes, control[2:4])
@@ -189,7 +178,7 @@ class KinematicModel:
         )
 
     def state_derivative(self, state: Any, control: Any) -> Any:
-        """Representative midpoint state derivative for diagnostics."""
+        """Instantaneous derivative at the beginning of the interval."""
 
         q_rates = self.articulation_rates(state[3:5], control)
         pose_rate = self.pose_derivative(state[0:3], state[3:5], control)
@@ -197,21 +186,27 @@ class KinematicModel:
             return ca.vertcat(pose_rate, q_rates)
         return np.r_[pose_rate, np.asarray(q_rates, dtype=float).reshape(2)]
 
-    def discrete_step(self, state: Any, control: Any) -> Any:
-        """Integrate pose while the articulations move linearly to ``q_cmd``.
+    def intermediate_state(self, state: Any, control: Any, fraction: float) -> Any:
+        """Integrate the state up to ``fraction`` of the control interval.
 
-        The previous model evaluated the whole interval at the final commanded
-        angles, effectively rotating the tracks instantaneously despite the
-        articulation-rate constraint.  Here the RK4 stages use the actual
-        beginning, midpoint and end angles of the interval.
+        The articulation interpolation is defined over the full controller
+        period, so a fractional RK4 integration uses the corresponding track
+        angles at the beginning, midpoint and end of that subinterval.
         """
 
-        dt = self.mpc_parameters.dt
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError("fraction must lie in [0, 1]")
+        dt = self.mpc_parameters.dt * fraction
         pose = state[0:3]
         q_start = state[3:5]
         q_delta = control[0:2] - q_start
-        q_mid = q_start + 0.5 * q_delta
-        q_end = control[0:2]
+        q_mid = q_start + 0.5 * fraction * q_delta
+        q_end = q_start + fraction * q_delta
+
+        if fraction == 0.0:
+            if is_symbolic(state[0]):
+                return ca.vertcat(pose, q_start)
+            return np.asarray(state, dtype=float).reshape(5).copy()
 
         k1 = self.pose_derivative(pose, q_start, control)
         k2 = self.pose_derivative(pose + 0.5 * dt * k1, q_mid, control)
@@ -225,6 +220,11 @@ class KinematicModel:
             np.asarray(next_pose, dtype=float).reshape(3),
             np.asarray(q_end, dtype=float).reshape(2),
         ]
+
+    def discrete_step(self, state: Any, control: Any) -> Any:
+        """Integrate one full period while steering linearly to ``q_cmd``."""
+
+        return self.intermediate_state(state, control, 1.0)
 
     def world_velocity(self, state: Any, control: Any) -> Any:
         """Average world translational velocity over one discrete interval."""
